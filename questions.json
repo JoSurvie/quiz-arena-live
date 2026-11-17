@@ -1,0 +1,17 @@
+[
+  {"category": "Géographie", "q": "Quelle est la capitale de l'Australie ?", "options": ["Sydney", "Melbourne", "Canberra", "Perth"], "answer": 2},
+  {"category": "Histoire", "q": "En quelle année a eu lieu la prise de la Bastille ?", "options": ["1789", "1792", "1776", "1804"], "answer": 0},
+  {"category": "Sciences", "q": "Quel est le symbole chimique de l'or ?", "options": ["Ag", "Au", "Or", "Go"], "answer": 1},
+  {"category": "Cinéma", "q": "Qui a réalisé « Le Fabuleux Destin d'Amélie Poulain » ?", "options": ["Luc Besson", "Jean-Pierre Jeunet", "Jacques Audiard", "François Ozon"], "answer": 1},
+  {"category": "Sport", "q": "Combien de joueurs compte une équipe de football sur le terrain ?", "options": ["9", "10", "12", "11"], "answer": 3},
+  {"category": "Musique", "q": "Quel célèbre compositeur est devenu sourd au cours de sa vie ?", "options": ["Mozart", "Bach", "Beethoven", "Chopin"], "answer": 2},
+  {"category": "Nature", "q": "Quel est le plus grand mammifère du monde ?", "options": ["L'éléphant d'Afrique", "La baleine bleue", "La girafe", "Le cachalot"], "answer": 1},
+  {"category": "Littérature", "q": "Qui a écrit « Les Misérables » ?", "options": ["Émile Zola", "Victor Hugo", "Alexandre Dumas", "Gustave Flaubert"], "answer": 1},
+  {"category": "Espace", "q": "Quelle planète est la plus proche du Soleil ?", "options": ["Vénus", "Mars", "La Terre", "Mercure"], "answer": 3},
+  {"category": "Géographie", "q": "Quel est le plus long fleuve de France ?", "options": ["La Seine", "Le Rhône", "La Loire", "La Garonne"], "answer": 2},
+  {"category": "Technologie", "q": "Que signifie le sigle « HTML » ?", "options": ["HyperText Markup Language", "High Tech Modern Language", "Hyperlink Text Management Logic", "Home Tool Markup Language"], "answer": 0},
+  {"category": "Gastronomie", "q": "Quel fromage est indispensable à une tartiflette ?", "options": ["Le comté", "Le reblochon", "Le camembert", "Le roquefort"], "answer": 1},
+  {"category": "Mathématiques", "q": "Combien font 7 × 8 ?", "options": ["54", "56", "58", "64"], "answer": 1},
+  {"category": "Art", "q": "Qui a peint « La Joconde » ?", "options": ["Michel-Ange", "Raphaël", "Botticelli", "Léonard de Vinci"], "answer": 3},
+  {"category": "Corps humain", "q": "Combien d'os compte le squelette d'un adulte ?", "options": ["186", "206", "226", "256"], "answer": 1}
+]

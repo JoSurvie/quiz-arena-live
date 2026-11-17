@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#1e1b4b" />
+  <title>Quiz Arena Live</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <style>
+    html, body { height: 100%; }
+    body {
+      background: radial-gradient(circle at 20% 10%, #4c1d95 0%, #1e1b4b 45%, #0f0a2e 100%);
+      font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #big-qr img, #big-qr canvas, #mini-qr img, #mini-qr canvas { width: 100%; height: auto; display: block; }
+    .pop { animation: pop .35s ease-out; }
+    @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .pulse-soft { animation: pulseSoft 2s ease-in-out infinite; }
+    @keyframes pulseSoft { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+    .answer-btn:active:not(:disabled) { transform: scale(.96); }
+  </style>
+</head>
+<body class="text-white antialiased">
+  <div id="app" class="h-full"></div>
+
+<script>
+  "use strict";
+
+  const SHAPES = ["▲", "◆", "●", "■"];
+  const COLORS = ["bg-rose-500", "bg-sky-500", "bg-amber-400", "bg-emerald-500"];
+  const AVATARS = ["😎", "🦊", "🐼", "🐸", "🦁", "🐙", "🦄", "🐯", "🐵", "🐧", "🤖", "👽", "🐲", "🍕", "🚀", "⚡"];
+  const app = document.getElementById("app");
+  const params = new URLSearchParams(window.location.search);
+  const ROOM_PARAM = (params.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
+  const WS_BASE = (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
+
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function fmt(sec) {
+    sec = Math.max(0, sec | 0);
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : String(s);
+  }
+  function $(id) { return document.getElementById(id); }
+  function setText(id, v) { const el = $(id); if (el) el.textContent = v; }
+
+  if (params.has("room")) initPlayer(); else initTV();
+
+  /* ======================================================================
+   *  MODE TV
+   * ==================================================================== */
+  function initTV() {
+    let ws = null;
+    let state = null;
+    let roomCode = localStorage.getItem("qal_tv_room") || "";
+    let lastKey = "";
+    let miniQrFor = "";
+    let confettiTimer = null;
+    let wakeLock = null;
+
+    const joinUrl = () => `${window.location.origin}/?room=${roomCode}`;
+
+    // --- Anti-veille -------------------------------------------------------
+    async function requestWakeLock() {
+      try {
+        if ("wakeLock" in navigator && document.visibilityState === "visible" && !wakeLock) {
+          wakeLock = await navigator.wakeLock.request("screen");
+          wakeLock.addEventListener("release", () => { wakeLock = null; updateWakeBadge(); });
+        }
+      } catch (e) { console.warn("WakeLock indisponible :", e); }
+      updateWakeBadge();
+    }
+    function updateWakeBadge() {
+      const el = $("wake");
+      if (el) el.textContent = wakeLock ? "🔆 Écran maintenu allumé" : "💤 Cliquez pour empêcher la veille";
+    }
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") requestWakeLock(); });
+    document.addEventListener("click", () => requestWakeLock());
+
+    // --- Structure ---------------------------------------------------------
+    app.innerHTML = `
+      <div class="h-full flex flex-col">
+        <header class="flex items-center justify-between px-6 py-3 pr-20">
+          <div class="flex items-center gap-3">
+            <div class="text-3xl font-black tracking-tight">Quiz <span class="text-amber-300">Arena</span> Live</div>
+            <span id="live" class="text-xs font-bold bg-rose-600 px-2 py-0.5 rounded-full pulse-soft">● LIVE</span>
+            <span id="speed-badge" class="hidden text-xs font-bold bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full">⚡ 5x</span>
+          </div>
+          <div id="mini-qr-wrap" class="hidden items-center gap-3 bg-white/10 rounded-2xl p-2 pr-4">
+            <div class="bg-white p-1.5 rounded-xl w-24"><div id="mini-qr"></div></div>
+            <div class="leading-tight">
+              <div class="text-xs uppercase opacity-70">Rejoindre</div>
+              <div id="mini-code" class="text-2xl font-black tracking-widest text-amber-300"></div>
+            </div>
+          </div>
+        </header>
+        <main id="tv-main" class="flex-1 min-h-0"></main>
+        <footer class="px-6 py-2 text-xs opacity-50 flex justify-between">
+          <span id="wake"></span><span id="conn">Connexion…</span>
+        </footer>
+      </div>
+
+      <button id="gear" title="Régie" class="fixed top-3 right-4 text-2xl opacity-30 hover:opacity-100 transition">⚙️</button>
+      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 w-60">
+        <div class="text-xs uppercase opacity-60 px-1">Régie</div>
+        <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2 font-bold text-left">⏭️ Étape suivante</button>
+        <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-4 py-2 font-bold text-left">⚡ Vitesse : 1x</button>
+        <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-4 py-2 font-bold text-left">📱 Ouvrir vue Mobile</button>
+      </div>`;
+
+    $("gear").onclick = (e) => { e.stopPropagation(); $("regie").classList.toggle("hidden"); };
+    $("btn-next").onclick = () => send("NEXT");
+    $("btn-speed").onclick = () => send("TOGGLE_SPEED");
+    $("btn-mobile").onclick = () => { if (roomCode) window.open(joinUrl(), "_blank"); };
+    updateWakeBadge();
+    requestWakeLock();
+
+    // --- WebSocket ---------------------------------------------------------
+    function connect() {
+      const qs = roomCode ? `?room=${encodeURIComponent(roomCode)}` : "";
+      ws = new WebSocket(`${WS_BASE}/ws/tv${qs}`);
+      ws.onopen = () => setText("conn", "🟢 Connecté");
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "room") {
+          if (msg.room !== roomCode) { lastKey = ""; miniQrFor = ""; }
+          roomCode = msg.room;
+          localStorage.setItem("qal_tv_room", roomCode);
+        } else if (msg.type === "state") {
+          state = msg;
+          render();
+        }
+      };
+      ws.onclose = () => { setText("conn", "🔴 Reconnexion…"); setTimeout(connect, 2000); };
+    }
+    function send(type) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type })); }
+    connect();
+
+    // --- Rendu -------------------------------------------------------------
+    function render() {
+      const key = `${state.room}|${state.phase}|${state.q_index}`;
+      if (key !== lastKey) {
+        lastKey = key;
+        buildView();
+        if (state.phase === "PODIUM") fireConfetti(); else stopConfetti();
+      }
+      updateDynamic();
+    }
+
+    function buildView() {
+      const main = $("tv-main");
+      const s = state;
+      if (s.phase === "LOBBY") {
+        main.innerHTML = `
+          <div class="h-full grid lg:grid-cols-2 gap-10 px-10 py-6 items-center">
+            <div class="flex flex-col items-center text-center pop">
+              <h2 class="text-4xl font-extrabold">Scannez pour jouer !</h2>
+              <div class="bg-white p-5 rounded-3xl shadow-2xl mt-6 w-[min(380px,60vh)]"><div id="big-qr"></div></div>
+              <div class="mt-5 text-lg opacity-80">ou rendez-vous sur <span class="font-mono text-amber-200">${esc(window.location.origin)}</span></div>
+              <div class="mt-2 text-xl">Code de la salle</div>
+              <div class="text-7xl font-black tracking-[0.3em] text-amber-300 drop-shadow">${esc(s.room)}</div>
+            </div>
+            <div class="flex flex-col h-full min-h-0 py-4">
+              <div class="flex items-end justify-between">
+                <h2 class="text-3xl font-bold">Joueurs <span id="player-count" class="text-amber-300"></span></h2>
+                <div class="text-right">
+                  <div class="text-sm uppercase opacity-70">Début dans</div>
+                  <div id="timer" class="text-6xl font-black font-mono"></div>
+                </div>
+              </div>
+              <div id="player-list" class="mt-6 grid grid-cols-2 xl:grid-cols-3 gap-3 overflow-y-auto content-start flex-1"></div>
+            </div>
+          </div>`;
+        const box = $("big-qr");
+        box.innerHTML = "";
+        new QRCode(box, { text: joinUrl(), width: 512, height: 512, colorDark: "#1e1b4b", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+      } else if (s.phase === "QUESTION" && s.question) {
+        main.innerHTML = `
+          <div class="h-full flex flex-col px-8 pb-6 gap-5">
+            <div class="flex items-center justify-between text-xl">
+              <span class="bg-white/15 rounded-full px-4 py-1 font-bold">${esc(s.question.category)}</span>
+              <span class="opacity-80">Question <b>${s.q_index + 1}</b> / ${s.q_total}</span>
+              <span id="answered" class="opacity-80"></span>
+            </div>
+            <div class="flex-1 flex items-center justify-center gap-8">
+              <div id="timer" class="shrink-0 w-32 h-32 rounded-full bg-white/10 border-4 border-amber-300 flex items-center justify-center text-6xl font-black"></div>
+              <h1 class="text-4xl md:text-6xl font-extrabold text-center leading-tight pop">${esc(s.question.q)}</h1>
+            </div>
+            <div class="h-3 bg-white/10 rounded-full overflow-hidden"><div id="bar" class="h-full bg-amber-300 transition-all duration-1000 ease-linear" style="width:100%"></div></div>
+            <div class="grid grid-cols-2 gap-4">
+              ${s.question.options.map((o, i) => `
+                <div class="${COLORS[i]} rounded-2xl px-6 py-6 flex items-center gap-5 shadow-xl pop">
+                  <span class="text-5xl drop-shadow">${SHAPES[i]}</span>
+                  <span class="text-2xl md:text-4xl font-bold">${esc(o)}</span>
+                </div>`).join("")}
+            </div>
+          </div>`;
+      } else if (s.phase === "REVEAL" && s.question) {
+        const total = Math.max(1, s.counts.reduce((a, b) => a + b, 0));
+        main.innerHTML = `
+          <div class="h-full flex flex-col px-8 pb-6 gap-5">
+            <div class="flex items-center justify-between text-xl">
+              <span class="bg-white/15 rounded-full px-4 py-1 font-bold">${esc(s.question.category)}</span>
+              <span class="opacity-80">Question <b>${s.q_index + 1}</b> / ${s.q_total}</span>
+              <span class="opacity-80">Suite dans <b id="timer"></b> s</span>
+            </div>
+            <h1 class="text-3xl md:text-5xl font-extrabold text-center leading-tight">${esc(s.question.q)}</h1>
+            <div class="flex-1 min-h-0 grid lg:grid-cols-3 gap-6">
+              <div class="lg:col-span-2 grid grid-cols-2 gap-4 content-center">
+                ${s.question.options.map((o, i) => {
+                  const ok = i === s.question.answer;
+                  return `
+                  <div class="${COLORS[i]} ${ok ? "ring-8 ring-white scale-105" : "opacity-30"} transition rounded-2xl px-6 py-6 flex items-center gap-5 shadow-xl relative">
+                    <span class="text-5xl">${SHAPES[i]}</span>
+                    <span class="text-2xl md:text-3xl font-bold flex-1">${esc(o)}</span>
+                    <span class="text-3xl font-black">${ok ? "✔" : ""}</span>
+                    <span class="absolute -top-3 -right-3 bg-slate-900 rounded-full px-3 py-1 text-lg font-bold">${s.counts[i]} 👤</span>
+                    <div class="absolute bottom-0 left-0 h-2 bg-white/70 rounded-bl-2xl" style="width:${(s.counts[i] / total) * 100}%"></div>
+                  </div>`;
+                }).join("")}
+              </div>
+              <div class="bg-white/10 rounded-3xl p-5 overflow-y-auto">
+                <h3 class="text-2xl font-bold mb-3">🏅 Classement</h3>
+                ${s.leaderboard.length ? s.leaderboard.slice(0, 8).map((p, i) => `
+                  <div class="flex items-center gap-3 py-2 border-b border-white/10 pop">
+                    <span class="w-8 text-xl font-black text-amber-300">${i + 1}</span>
+                    <span class="text-3xl">${esc(p.avatar)}</span>
+                    <span class="flex-1 text-xl font-semibold truncate">${esc(p.name)}</span>
+                    <span class="text-sm ${p.last_correct ? "text-emerald-300" : "text-rose-300"}">${p.last_correct ? "+" + p.last_points : "+0"}</span>
+                    <span class="text-xl font-bold w-20 text-right">${p.score}</span>
+                  </div>`).join("") : `<div class="opacity-60">Aucun joueur</div>`}
+              </div>
+            </div>
+          </div>`;
+      } else if (s.phase === "PODIUM") {
+        const b = s.leaderboard;
+        const step = (p, place, h, color) => p ? `
+          <div class="flex flex-col items-center justify-end pop">
+            <div class="text-6xl mb-2">${esc(p.avatar)}</div>
+            <div class="text-2xl font-bold max-w-[12rem] truncate">${esc(p.name)}</div>
+            <div class="text-lg opacity-80 mb-2">${p.score} pts</div>
+            <div class="${color} ${h} w-44 rounded-t-2xl flex items-start justify-center pt-3 text-5xl font-black shadow-2xl">${place}</div>
+          </div>` : `<div class="w-44"></div>`;
+        main.innerHTML = `
+          <div class="h-full flex flex-col items-center px-8 pb-6">
+            <h1 class="text-6xl font-black mt-2">🏆 Podium</h1>
+            <div class="opacity-70 mt-1">Nouvelle partie dans <b id="timer"></b> s</div>
+            <div class="flex-1 flex items-end justify-center gap-4 mt-4">
+              ${step(b[1], "2", "h-40", "bg-slate-300 text-slate-800")}
+              ${step(b[0], "1", "h-56", "bg-amber-400 text-slate-900")}
+              ${step(b[2], "3", "h-28", "bg-orange-700")}
+            </div>
+            ${b.length > 3 ? `<div class="mt-6 flex flex-wrap justify-center gap-3">
+              ${b.slice(3, 10).map((p, i) => `<div class="bg-white/10 rounded-xl px-4 py-2 text-lg"><b class="text-amber-300">${i + 4}.</b> ${esc(p.avatar)} ${esc(p.name)} — ${p.score}</div>`).join("")}
+            </div>` : ""}
+            ${b.length === 0 ? `<div class="text-2xl opacity-60 mt-10">Aucun joueur cette fois-ci 😢</div>` : ""}
+          </div>`;
+      } else {
+        main.innerHTML = `<div class="h-full flex items-center justify-center text-2xl opacity-60">Chargement…</div>`;
+      }
+    }
+
+    function updateDynamic() {
+      const s = state;
+      setText("timer", fmt(s.timer));
+      const bar = $("bar");
+      if (bar) bar.style.width = `${(s.timer / Math.max(1, s.duration)) * 100}%`;
+      setText("answered", `${s.answered_count} / ${s.players.filter(p => p.connected).length} réponse(s)`);
+      setText("btn-speed", `⚡ Vitesse : ${s.speed}x`);
+      $("speed-badge").classList.toggle("hidden", s.speed === 1);
+
+      // Mini QR permanent hors lobby
+      const wrap = $("mini-qr-wrap");
+      const showMini = s.phase !== "LOBBY" && roomCode;
+      wrap.classList.toggle("hidden", !showMini);
+      wrap.classList.toggle("flex", !!showMini);
+      if (roomCode && miniQrFor !== roomCode) {
+        miniQrFor = roomCode;
+        const box = $("mini-qr");
+        box.innerHTML = "";
+        new QRCode(box, { text: joinUrl(), width: 256, height: 256, colorDark: "#1e1b4b", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+        setText("mini-code", roomCode);
+      }
+
+      // Liste des joueurs (lobby)
+      const list = $("player-list");
+      if (list) {
+        setText("player-count", `(${s.players.length})`);
+        list.innerHTML = s.players.length ? s.players.map(p => `
+          <div class="bg-white/10 rounded-2xl px-4 py-3 flex items-center gap-3 ${p.connected ? "" : "opacity-40"}">
+            <span class="text-4xl">${esc(p.avatar)}</span>
+            <span class="text-xl font-semibold truncate flex-1">${esc(p.name)}</span>
+            <span class="w-2.5 h-2.5 rounded-full ${p.connected ? "bg-emerald-400" : "bg-slate-500"}"></span>
+          </div>`).join("")
+          : `<div class="col-span-full text-xl opacity-60 pulse-soft">En attente des premiers joueurs…</div>`;
+      }
+    }
+
+    function fireConfetti() {
+      stopConfetti();
+      if (typeof confetti !== "function") return;
+      const end = Date.now() + 6000;
+      confetti({ particleCount: 180, spread: 100, origin: { y: 0.6 } });
+      confettiTimer = setInterval(() => {
+        if (Date.now() > end) return stopConfetti();
+        confetti({ particleCount: 6, angle: 60, spread: 60, origin: { x: 0 } });
+        confetti({ particleCount: 6, angle: 120, spread: 60, origin: { x: 1 } });
+      }, 120);
+    }
+    function stopConfetti() { if (confettiTimer) { clearInterval(confettiTimer); confettiTimer = null; } }
+  }
+
+  /* ======================================================================
+   *  MODE PARTICIPANT (mobile)
+   * ==================================================================== */
+  function initPlayer() {
+    const code = ROOM_PARAM;
+    let pid = localStorage.getItem("qal_player_id");
+    if (!pid) {
+      pid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID().replace(/-/g, "")
+          : Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+      localStorage.setItem("qal_player_id", pid);
+    }
+    let profile = null;
+    try { profile = JSON.parse(localStorage.getItem("qal_profile") || "null"); } catch (_) {}
+    let selectedAvatar = (profile && profile.avatar) || AVATARS[Math.floor(Math.random() * AVATARS.length)];
+    let ws = null, state = null, lastKey = "", joinSent = false, pendingChoice = null, celebrated = "", editing = false;
+
+    app.innerHTML = `
+      <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
+        <header class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <div class="font-black text-lg">Quiz <span class="text-amber-300">Arena</span></div>
+          <div id="me" class="flex items-center gap-2 text-sm"></div>
+          <div class="text-xs bg-white/10 rounded-full px-2 py-1 font-mono">${esc(code || "?????")}</div>
+        </header>
+        <main id="pl-main" class="flex-1 min-h-0 p-4 flex flex-col"></main>
+      </div>`;
+
+    if (code.length !== 5) { showError("Code de salle invalide. Scannez à nouveau le QR code affiché sur la TV."); return; }
+
+    function connect() {
+      ws = new WebSocket(`${WS_BASE}/ws/player/${code}/${pid}`);
+      ws.onopen = () => { joinSent = false; };
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "error") {
+          if (!state || !state.joined) showError(msg.message);
+          return;
+        }
+        if (msg.type !== "state") return;
+        state = msg;
+        if (!state.joined && profile && profile.name && !joinSent) {
+          joinSent = true;
+          sendMsg({ type: "JOIN", name: profile.name, avatar: profile.avatar });
+        }
+        if (state.phase !== "QUESTION" || state.my_answer !== null) pendingChoice = null;
+        render();
+      };
+      ws.onclose = () => setTimeout(connect, 2500);
+    }
+    function sendMsg(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
+    connect();
+
+    function showError(message) {
+      lastKey = "error";
+      $("pl-main").innerHTML = `
+        <div class="flex-1 flex flex-col items-center justify-center text-center gap-4">
+          <div class="text-6xl">😕</div>
+          <div class="text-xl font-bold">${esc(message)}</div>
+          <div class="text-sm opacity-60 pulse-soft">Nouvelle tentative automatique…</div>
+        </div>`;
+    }
+
+    function render() {
+      const s = state;
+      $("me").innerHTML = s.joined
+        ? `<span class="text-2xl">${esc(s.avatar)}</span><span class="font-semibold max-w-[8rem] truncate">${esc(s.name)}</span><span class="bg-amber-400 text-slate-900 font-bold rounded-full px-2">${s.score}</span>`
+        : "";
+      const answered = s.my_answer !== null || pendingChoice !== null;
+      const key = (!s.joined || editing) ? "join" : `${s.phase}|${s.q_index}|${answered}`;
+      if (key !== lastKey) { lastKey = key; buildView(); }
+      setText("pl-timer", fmt(s.timer));
+      setText("pl-count", s.players_count);
+    }
+
+    function buildView() {
+      const s = state, main = $("pl-main");
+
+      if (!s.joined || editing) {
+        main.innerHTML = `
+          <div class="flex-1 flex flex-col gap-5 justify-center pop">
+            <h1 class="text-3xl font-black text-center">Rejoins la partie !</h1>
+            <div>
+              <div class="text-sm uppercase opacity-70 mb-2">Choisis ton avatar</div>
+              <div id="avatars" class="grid grid-cols-8 gap-2">
+                ${AVATARS.map(a => `<button data-a="${a}" class="avatar text-3xl aspect-square rounded-xl bg-white/10 transition ${a === selectedAvatar ? "ring-4 ring-amber-300 bg-white/25 scale-110" : ""}">${a}</button>`).join("")}
+              </div>
+            </div>
+            <div>
+              <div class="text-sm uppercase opacity-70 mb-2">Ton pseudo</div>
+              <input id="name" maxlength="16" autocomplete="off" placeholder="Ex : Super Quizzeur"
+                class="w-full rounded-2xl bg-white text-slate-900 text-xl font-bold px-4 py-4 outline-none focus:ring-4 ring-amber-300"
+                value="${esc((profile && profile.name) || "")}" />
+            </div>
+            <button id="join" class="w-full rounded-2xl bg-amber-400 text-slate-900 text-2xl font-black py-4 shadow-xl active:scale-95 transition">C'est parti ! 🚀</button>
+            <div id="join-err" class="text-center text-rose-300 h-5"></div>
+          </div>`;
+        main.querySelectorAll(".avatar").forEach(btn => btn.onclick = () => {
+          selectedAvatar = btn.dataset.a;
+          main.querySelectorAll(".avatar").forEach(b => b.classList.remove("ring-4", "ring-amber-300", "bg-white/25", "scale-110"));
+          btn.classList.add("ring-4", "ring-amber-300", "bg-white/25", "scale-110");
+        });
+        const doJoin = () => {
+          const name = $("name").value.trim();
+          if (!name) { setText("join-err", "Entre un pseudo 🙂"); return; }
+          profile = { name, avatar: selectedAvatar };
+          localStorage.setItem("qal_profile", JSON.stringify(profile));
+          joinSent = true;
+          editing = false;
+          sendMsg({ type: "JOIN", name, avatar: selectedAvatar });
+          $("join").disabled = true;
+          $("join").textContent = "Connexion…";
+        };
+        $("join").onclick = doJoin;
+        $("name").onkeydown = (e) => { if (e.key === "Enter") doJoin(); };
+        return;
+      }
+
+      if (s.phase === "LOBBY") {
+        main.innerHTML = `
+          <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 pop">
+            <div class="text-8xl">${esc(s.avatar)}</div>
+            <div class="text-3xl font-black">Bienvenue ${esc(s.name)} !</div>
+            <div class="opacity-80">Tu es inscrit. Garde les yeux sur l'écran 📺</div>
+            <div class="mt-4 bg-white/10 rounded-3xl px-8 py-5">
+              <div class="text-sm uppercase opacity-70">La partie commence dans</div>
+              <div id="pl-timer" class="text-6xl font-black font-mono"></div>
+            </div>
+            <div class="opacity-70"><span id="pl-count"></span> joueur(s) dans la salle</div>
+            <button id="edit" class="text-sm underline opacity-60 mt-2">Modifier mon profil</button>
+          </div>`;
+        $("edit").onclick = () => { editing = true; render(); };
+        return;
+      }
+
+      if (s.phase === "QUESTION") {
+        const mine = s.my_answer !== null ? s.my_answer : pendingChoice;
+        if (mine === null) {
+          main.innerHTML = `
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm opacity-80">Question ${s.q_index + 1}/${s.q_total}</span>
+              <span id="pl-timer" class="text-2xl font-black bg-white/10 rounded-full w-12 h-12 flex items-center justify-center"></span>
+            </div>
+            ${s.question ? `<div class="text-center font-bold text-lg mb-3 leading-snug">${esc(s.question.q)}</div>` : ""}
+            <div class="flex-1 grid grid-cols-2 grid-rows-2 gap-3">
+              ${[0, 1, 2, 3].map(i => `
+                <button data-c="${i}" class="answer-btn ${COLORS[i]} rounded-3xl flex flex-col items-center justify-center gap-2 shadow-xl transition p-2">
+                  <span class="text-7xl drop-shadow">${SHAPES[i]}</span>
+                  ${s.question ? `<span class="text-sm font-semibold leading-tight">${esc(s.question.options[i])}</span>` : ""}
+                </button>`).join("")}
+            </div>`;
+          main.querySelectorAll(".answer-btn").forEach(btn => btn.onclick = () => {
+            const c = Number(btn.dataset.c);
+            pendingChoice = c;
+            main.querySelectorAll(".answer-btn").forEach(b => b.disabled = true);
+            if (navigator.vibrate) navigator.vibrate(40);
+            sendMsg({ type: "ANSWER", choice: c });
+            render();
+          });
+        } else {
+          main.innerHTML = `
+            <div class="flex-1 flex flex-col items-center justify-center text-center gap-5 pop">
+              <div class="${COLORS[mine]} w-40 h-40 rounded-3xl flex items-center justify-center text-8xl shadow-2xl">${SHAPES[mine]}</div>
+              <div class="text-2xl font-black">🔒 Réponse verrouillée</div>
+              <div class="opacity-70 pulse-soft">En attente des autres joueurs…</div>
+              <div class="opacity-60">⏱ <span id="pl-timer"></span> s</div>
+            </div>`;
+        }
+        return;
+      }
+
+      if (s.phase === "REVEAL") {
+        const ans = s.question ? s.question.answer : null;
+        const noAnswer = s.my_answer === null;
+        const ok = s.last_correct === true;
+        const bg = ok ? "bg-emerald-600" : (noAnswer ? "bg-slate-700" : "bg-rose-600");
+        main.innerHTML = `
+          <div class="flex-1 ${bg} rounded-3xl flex flex-col items-center justify-center text-center gap-4 p-6 pop">
+            <div class="text-7xl">${ok ? "✅" : (noAnswer ? "⏱️" : "❌")}</div>
+            <div class="text-3xl font-black">${ok ? "Bonne réponse !" : (noAnswer ? "Temps écoulé !" : "Raté !")}</div>
+            <div class="text-5xl font-black">+${s.last_points}</div>
+            ${ans !== null ? `<div class="flex items-center gap-3 bg-black/20 rounded-2xl px-4 py-3">
+              <span class="${COLORS[ans]} w-12 h-12 rounded-xl flex items-center justify-center text-3xl">${SHAPES[ans]}</span>
+              <span class="text-left font-semibold">${esc(s.question.options[ans])}</span></div>` : ""}
+            <div class="mt-2 text-lg">Score : <b>${s.score}</b> pts · ${s.rank ? `<b>${s.rank}<sup>${s.rank === 1 ? "er" : "e"}</sup></b> / ${s.players_count}` : ""}</div>
+          </div>`;
+        if (ok && navigator.vibrate) navigator.vibrate([60, 40, 60]);
+        return;
+      }
+
+      if (s.phase === "PODIUM") {
+        const medal = { 1: "🥇", 2: "🥈", 3: "🥉" }[s.rank] || "🎉";
+        main.innerHTML = `
+          <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 pop">
+            <div class="text-8xl">${medal}</div>
+            <div class="text-2xl opacity-80">Tu termines</div>
+            <div class="text-6xl font-black">${s.rank ? `${s.rank}<sup class="text-3xl">${s.rank === 1 ? "er" : "e"}</sup>` : "-"}</div>
+            <div class="text-xl">sur ${s.players_count} avec <b class="text-amber-300">${s.score} pts</b></div>
+            <div class="w-full bg-white/10 rounded-2xl p-4 mt-2 text-left">
+              ${s.top3.map((p, i) => `<div class="flex items-center gap-3 py-1"><span>${["🥇", "🥈", "🥉"][i]}</span><span class="text-2xl">${esc(p.avatar)}</span><span class="flex-1 truncate font-semibold">${esc(p.name)}</span><b>${p.score}</b></div>`).join("")}
+            </div>
+            <div class="opacity-60 text-sm">Nouvelle partie dans <span id="pl-timer"></span> s</div>
+          </div>`;
+        const k = `${s.q_total}|${s.score}`;
+        if (s.rank && s.rank <= 3 && typeof confetti === "function" && celebrated !== k) {
+          celebrated = k;
+          confetti({ particleCount: 150, spread: 90, origin: { y: 0.7 } });
+        }
+      }
+    }
+  }
+</script>
+</body>
+</html>
