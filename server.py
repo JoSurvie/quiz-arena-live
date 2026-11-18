@@ -87,18 +87,27 @@ def load_questions() -> list[dict[str, Any]]:
     return valid
 
 
+SYS_RNG = random.SystemRandom()
+MIX_CATEGORY = "Mix Aléatoire"
+
 QUESTIONS = load_questions()
-CATEGORIES: list[str] = list(dict.fromkeys(q["category"] for q in QUESTIONS))
+BASE_CATEGORIES: list[str] = list(dict.fromkeys(q["category"] for q in QUESTIONS))
+CATEGORIES: list[str] = BASE_CATEGORIES + [MIX_CATEGORY]
 QUESTIONS_BY_CATEGORY: dict[str, list[dict[str, Any]]] = {
-    cat: [q for q in QUESTIONS if q["category"] == cat] for cat in CATEGORIES
+    cat: [q for q in QUESTIONS if q["category"] == cat] for cat in BASE_CATEGORIES
 }
+QUESTIONS_BY_CATEGORY[MIX_CATEGORY] = list(QUESTIONS)
 QUESTIONS_BY_CAT_DIFF: dict[tuple[str, str], list[dict[str, Any]]] = {
     (cat, diff): [
         q for q in QUESTIONS if q["category"] == cat and q["difficulty"] == diff
     ]
-    for cat in CATEGORIES
+    for cat in BASE_CATEGORIES
     for diff in ("standard", "debutant")
 }
+for _diff in ("standard", "debutant"):
+    QUESTIONS_BY_CAT_DIFF[(MIX_CATEGORY, _diff)] = [
+        q for q in QUESTIONS if q["difficulty"] == _diff
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -164,6 +173,7 @@ class Room:
         self.played_categories: set[str] = set()
         self.last_game_players: set[str] = set()
         self.active_difficulty = "standard"
+        self.seen_questions: set[str] = set()
         self.questions: list[dict[str, Any]] = []
         self.q_index = -1
         self.counts = [0, 0, 0, 0]
@@ -288,6 +298,40 @@ class Room:
         self.timer = duration
         self.last_tick = time.monotonic()
 
+    def _draw_questions(self, pool: list[dict[str, Any]], k: int) -> list[dict[str, Any]]:
+        unseen = [q for q in pool if q["q"] not in self.seen_questions]
+        seen = [q for q in pool if q["q"] in self.seen_questions]
+        SYS_RNG.shuffle(unseen)
+        if len(unseen) >= k:
+            chosen = unseen[:k]
+        else:
+            chosen = list(unseen)
+            pool_keys = {q["q"] for q in pool}
+            self.seen_questions.difference_update(pool_keys)
+            SYS_RNG.shuffle(seen)
+            chosen.extend(seen[: k - len(chosen)])
+        self.seen_questions.update(q["q"] for q in chosen)
+        SYS_RNG.shuffle(chosen)
+
+        result = []
+        for q in chosen:
+            indexed = list(enumerate(q["options"]))
+            SYS_RNG.shuffle(indexed)
+            new_options = [opt for _, opt in indexed]
+            new_answer = next(
+                i for i, (orig_i, _) in enumerate(indexed) if orig_i == q["answer"]
+            )
+            result.append(
+                {
+                    "category": q["category"],
+                    "difficulty": q["difficulty"],
+                    "q": q["q"],
+                    "options": new_options,
+                    "answer": new_answer,
+                }
+            )
+        return result
+
     def start_game(self) -> None:
         self.refresh_category_locks()
         self.apply_votes()
@@ -297,7 +341,7 @@ class Room:
             QUESTIONS_BY_CAT_DIFF.get((self.category, self.active_difficulty))
             or QUESTIONS_BY_CATEGORY.get(self.category, QUESTIONS)
         )
-        self.questions = random.sample(pool, min(QUESTIONS_PER_GAME, len(pool)))
+        self.questions = self._draw_questions(pool, min(QUESTIONS_PER_GAME, len(pool)))
         self.q_index = 0
         self.fastest_record = None
         self.round_events = []
