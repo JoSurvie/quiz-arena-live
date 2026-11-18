@@ -1,5 +1,4 @@
-
-+<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
@@ -347,6 +346,21 @@
           </div>
         </div>
         <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📊 Stats Google Drive</span>
+            <div class="flex items-center gap-1.5">
+              <a href="https://docs.google.com/spreadsheets/d/1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI/edit?gid=0#gid=0" target="_blank" rel="noopener" class="text-[11px] bg-emerald-600/80 hover:bg-emerald-600 rounded-lg px-2 py-0.5 font-bold">📄 Ouvrir Sheet</a>
+              <a href="/api/stats/csv" download="laser-quiz-stats.csv" class="text-[11px] bg-white/10 hover:bg-white/20 rounded-lg px-2 py-0.5 font-bold">📥 CSV</a>
+            </div>
+          </div>
+          <input id="sheets-webhook-input" placeholder="URL Webhook Apps Script (https://script.google.com/.../exec)" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-[11px] text-white outline-none" />
+          <div class="flex gap-2">
+            <button id="btn-sheets-save" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">💾 Activer</button>
+            <button id="btn-sheets-test" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg py-1.5 text-xs font-bold">🧪 Tester</button>
+          </div>
+          <div id="sheets-status" class="text-[11px] opacity-75"></div>
+        </div>
+        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
           <div class="text-xs uppercase tracking-wider opacity-75 font-bold">👥 Joueurs en salle <span id="regie-player-count" class="text-amber-300"></span></div>
           <div id="regie-players" class="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1"></div>
         </div>
@@ -359,6 +373,14 @@
     $("btn-speed").onclick = () => send("TOGGLE_SPEED");
     $("btn-vote").onclick = () => send("TOGGLE_VOTE");
     $("btn-mobile").onclick = () => { if (roomCode) window.open(joinUrl(), "_blank"); };
+    $("btn-sheets-save").onclick = () => {
+      const url = ($("sheets-webhook-input").value || "").trim();
+      send("SET_SHEETS_WEBHOOK", { webhook_url: url });
+    };
+    $("btn-sheets-test").onclick = () => {
+      setText("sheets-status", "Envoi de test en cours…");
+      send("TEST_SHEETS_PUSH");
+    };
     $("btn-pb-manage").onclick = () => {
       const panel = $("pb-manage-panel");
       panel.classList.toggle("hidden");
@@ -837,16 +859,25 @@
       if (bar) bar.style.transform = `scaleX(${Math.max(0, Math.min(1, s.timer / Math.max(1, s.duration)))})`;
       setText("answered", `${s.answered_count} / ${s.players.filter(p => p.connected).length} réponse(s)`);
       setText("btn-speed", `⚡ Vitesse : ${s.speed}x`);
-      setText("btn-vote", `🗳️ Vote : ${voting ? "ON" : "OFF"}`);
-
       const speedBadge = $("speed-badge");
       if (speedBadge && speedBadge.classList.contains("hidden") !== (s.speed === 1)) {
         speedBadge.classList.toggle("hidden", s.speed === 1);
       }
+      setText("btn-vote", `🗳️ Vote : ${voting ? "ON" : "OFF"}`);
       const voteBadge = $("vote-badge");
       if (voteBadge && voteBadge.classList.contains("hidden") !== !voting) {
         voteBadge.classList.toggle("hidden", !voting);
       }
+
+      const pushSt = s.last_push_status || {};
+      const sheetsMsg = !s.sheets_webhook_set
+        ? "🟡 Webhook Apps Script non configuré"
+        : pushSt.ok === false
+          ? `🔴 Erreur synchro : ${pushSt.message || "échec"}`
+          : pushSt.ok === true
+            ? `🟢 ${pushSt.message || "Synchro OK"}`
+            : "🟢 Drive actif (envoi auto fin de partie)";
+      setText("sheets-status", sheetsMsg);
 
       // 2. Badges de difficulté (uniquement si changement)
       const diffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;
@@ -1404,9 +1435,9 @@
                 📲 Partager / Story (Image + Texte)
               </button>
               <div class="grid grid-cols-4 gap-1.5 text-xs font-bold">
-                <a target="_blank" rel="noopener" href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}" class="bg-black/60 hover:bg-black/80 rounded-xl py-2 flex items-center justify-center">𝕏</a>
-                <a target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}" class="bg-blue-600/80 hover:bg-blue-600 rounded-xl py-2 flex items-center justify-center">📘 FB</a>
-                <a target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}" class="bg-emerald-600/80 hover:bg-emerald-600 rounded-xl py-2 flex items-center justify-center">💬 WA</a>
+                <a target="_blank" rel="noopener" data-share="x" href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}" class="share-link-btn bg-black/60 hover:bg-black/80 rounded-xl py-2 flex items-center justify-center">𝕏</a>
+                <a target="_blank" rel="noopener" data-share="facebook" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}" class="share-link-btn bg-blue-600/80 hover:bg-blue-600 rounded-xl py-2 flex items-center justify-center">📘 FB</a>
+                <a target="_blank" rel="noopener" data-share="whatsapp" href="https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}" class="share-link-btn bg-emerald-600/80 hover:bg-emerald-600 rounded-xl py-2 flex items-center justify-center">💬 WA</a>
                 <button id="share-copy" class="bg-white/15 hover:bg-white/25 rounded-xl py-2">📋 Copier</button>
               </div>
               <div id="share-feedback" class="text-[11px] text-emerald-300 h-4"></div>
@@ -1471,9 +1502,13 @@
           return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
         }
 
+        main.querySelectorAll(".share-link-btn").forEach(a => {
+          a.onclick = () => sendMsg({ type: "SHARE", channel: a.dataset.share });
+        });
         $("share-copy").onclick = async () => {
           try {
             await navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
+            sendMsg({ type: "SHARE", channel: "copy" });
             setText("share-feedback", "✅ Texte copié !");
           } catch (_) {
             setText("share-feedback", "Copie impossible sur cet appareil.");
@@ -1485,11 +1520,13 @@
             const file = blob ? new File([blob], "laser-quiz-score.png", { type: "image/png" }) : null;
             if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
               await navigator.share({ title: "Laser Quiz", text: shareText, files: [file] });
+              sendMsg({ type: "SHARE", channel: "native" });
               setText("share-feedback", "✅ Carte partagée !");
               return;
             }
             if (navigator.share) {
               await navigator.share({ title: "Laser Quiz", text: shareText, url: shareUrl });
+              sendMsg({ type: "SHARE", channel: "native" });
               setText("share-feedback", "✅ Score partagé !");
               return;
             }
@@ -1498,6 +1535,7 @@
               a.href = URL.createObjectURL(blob);
               a.download = "laser-quiz-score.png";
               a.click();
+              sendMsg({ type: "SHARE", channel: "native" });
               setText("share-feedback", "📥 Image téléchargée !");
             }
           } catch (_) {}

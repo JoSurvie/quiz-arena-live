@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+import csv
+from datetime import datetime, timedelta, timezone
+import io
 import json
+import os
 import random
 import re
 import time
@@ -13,9 +16,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[assignment]
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -53,6 +60,138 @@ DEFAULT_STORES: list[dict[str, str]] = [
     {"name": "Sherbrooke", "url": "https://www.simplebooth.com/gallery/XCaTpPmn6r3h-lge-fev-2026"},
     {"name": "Ste-Catherine", "url": "https://www.simplebooth.com/gallery/ALkJDisegsdU-lge-fev-2026"},
 ]
+
+# --------------------------------------------------------------------------- #
+# Statistiques & Export automatique Google Sheets
+# --------------------------------------------------------------------------- #
+GOOGLE_SHEET_ID = "1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI"
+GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0#gid=0"
+STATS_CONFIG_FILE = BASE_DIR / "stats_config.json"
+STATS_HEADERS = [
+    "Horodatage",
+    "Adresse IP de la session",
+    "Nombre de joueurs",
+    "Nombre de questions répondues par joueur",
+    "Temps de jeu par joueur",
+    "Combien de partages de stats",
+]
+GAME_LOGS_HISTORY: list[dict[str, Any]] = []
+LAST_PUSH_STATUS: dict[str, Any] = {
+    "ok": None,
+    "message": "Aucun envoi effectué",
+    "at": "",
+}
+
+
+def _now_quebec_str() -> str:
+    tz = ZoneInfo("America/Toronto") if ZoneInfo is not None else timezone(timedelta(hours=-5))
+    return datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_duration(seconds: float) -> str:
+    sec = max(1, round(seconds))
+    mins, secs = divmod(sec, 60)
+    return f"{mins}m {secs:02d}s" if mins > 0 else f"{secs}s"
+
+
+def _extract_client_ip(websocket: WebSocket) -> str:
+    xff = websocket.headers.get("x-forwarded-for", "")
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    xri = websocket.headers.get("x-real-ip", "").strip()
+    if xri:
+        return xri
+    if websocket.client and websocket.client.host:
+        return str(websocket.client.host)
+    return "Inconnue"
+
+
+def get_sheets_webhook_url() -> str:
+    if STATS_CONFIG_FILE.exists():
+        try:
+            data = json.loads(STATS_CONFIG_FILE.read_text(encoding="utf-8"))
+            url = str(data.get("webhook_url") or "").strip()
+            if url:
+                return url
+        except Exception:
+            pass
+    return os.environ.get("GOOGLE_SHEETS_WEBHOOK_URL", "").strip()
+
+
+def set_sheets_webhook_url(url: str) -> str:
+    cleaned = url.strip()
+    if cleaned and not cleaned.startswith(("https://", "http://")):
+        raise ValueError("URL Webhook invalide.")
+    STATS_CONFIG_FILE.write_text(
+        json.dumps({"webhook_url": cleaned}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return cleaned
+
+
+def _record_game_history(payload: dict[str, Any]) -> None:
+    game_id = payload.get("game_id")
+    entry = {
+        "game_id": game_id,
+        "row": list(payload.get("row") or []),
+        "category": payload.get("category", ""),
+        "difficulty": payload.get("difficulty", ""),
+    }
+    for i, existing in enumerate(GAME_LOGS_HISTORY):
+        if existing.get("game_id") == game_id:
+            GAME_LOGS_HISTORY[i] = entry
+            return
+    GAME_LOGS_HISTORY.append(entry)
+    if len(GAME_LOGS_HISTORY) > 200:
+        del GAME_LOGS_HISTORY[:-200]
+
+
+def _push_sheets_sync(webhook_url: str, payload: dict[str, Any]) -> tuple[bool, str]:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        webhook_url,
+        data=body,
+        headers={"Content-Type": "application/json; charset=utf-8"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            status = getattr(resp, "status", 200)
+            raw = resp.read().decode("utf-8", errors="replace").strip()
+            if status >= 400:
+                return False, f"HTTP {status}: {raw[:160]}"
+            try:
+                parsed = json.loads(raw) if raw else {}
+                if isinstance(parsed, dict) and parsed.get("ok") is False:
+                    return False, str(parsed.get("error") or "Erreur Apps Script")
+            except json.JSONDecodeError:
+                pass
+            return True, f"Synchro OK ({payload['row'][0]})"
+    except urllib.error.HTTPError as err:
+        return False, f"HTTP {err.code}"
+    except Exception as exc:
+        return False, str(exc)[:160]
+
+
+async def push_game_stats_async(payload: dict[str, Any]) -> dict[str, Any]:
+    global LAST_PUSH_STATUS
+    webhook_url = get_sheets_webhook_url()
+    if not webhook_url:
+        LAST_PUSH_STATUS = {
+            "ok": False,
+            "message": "Webhook Google Apps Script non configuré",
+            "at": _now_quebec_str(),
+        }
+        return LAST_PUSH_STATUS
+    ok, msg = await asyncio.to_thread(_push_sheets_sync, webhook_url, payload)
+    LAST_PUSH_STATUS = {
+        "ok": ok,
+        "message": msg,
+        "at": _now_quebec_str(),
+    }
+    return LAST_PUSH_STATUS
 
 
 # --------------------------------------------------------------------------- #
@@ -182,6 +321,14 @@ class Room:
         self.round_events: list[dict[str, Any]] = []
         self.pending_kicks: list[tuple[WebSocket, str]] = []
         self.game_had_players = False
+        self.session_ip: str = ""
+        self.current_game_id: str = ""
+        self.game_started_at: float | None = None
+        self.game_ended_at: float | None = None
+        self.game_timestamp_str: str = ""
+        self.game_player_stats: dict[str, dict[str, Any]] = {}
+        self.game_shares_count: int = 0
+        self.game_logged: bool = False
         self.task: asyncio.Task | None = None
         self.last_tick = time.monotonic()
         self.empty_since: float | None = None
@@ -332,6 +479,91 @@ class Room:
             )
         return result
 
+    def register_player_in_game(self, p: Player) -> None:
+        if self.phase not in ("QUESTION", "REVEAL", "INTER_PODIUM") or not p.joined:
+            return
+        entry = self.game_player_stats.get(p.id)
+        if entry is None:
+            self.game_player_stats[p.id] = {
+                "name": p.name,
+                "joined_at": time.monotonic(),
+                "ended_at": None,
+                "questions_answered": 0,
+                "shares": 0,
+            }
+        else:
+            entry["name"] = p.name
+            entry["ended_at"] = None
+
+    def mark_player_left_game(self, pid: str) -> None:
+        if self.phase not in ("QUESTION", "REVEAL", "INTER_PODIUM"):
+            return
+        entry = self.game_player_stats.get(pid)
+        if entry is not None and entry["ended_at"] is None:
+            entry["ended_at"] = time.monotonic()
+
+    def build_game_stats_payload(self) -> dict[str, Any] | None:
+        if not self.current_game_id or not self.game_player_stats:
+            return None
+        stats_list = list(self.game_player_stats.values())
+        end_mono = self.game_ended_at or time.monotonic()
+        total_q = len(self.questions) or QUESTIONS_PER_GAME
+        avg_q = round(
+            sum(int(s["questions_answered"]) for s in stats_list) / len(stats_list), 1
+        )
+        detail_q = ", ".join(
+            f"{s['name']}: {s['questions_answered']}/{total_q}" for s in stats_list
+        )
+        durs = [
+            max(1, round((s["ended_at"] or end_mono) - float(s["joined_at"])))
+            for s in stats_list
+        ]
+        avg_t = _format_duration(sum(durs) / len(durs))
+        detail_t = ", ".join(
+            f"{s['name']}: {_format_duration(d)}" for s, d in zip(stats_list, durs)
+        )
+        ts = self.game_timestamp_str or _now_quebec_str()
+        row = [
+            ts,
+            self.session_ip or "Inconnue",
+            len(stats_list),
+            f"{avg_q:g} moy. ({detail_q})",
+            f"{avg_t} moy. ({detail_t})",
+            self.game_shares_count,
+        ]
+        return {
+            "game_id": self.current_game_id,
+            "sheet_id": GOOGLE_SHEET_ID,
+            "category": self.category,
+            "difficulty": self.active_difficulty,
+            "row": row,
+        }
+
+    def trigger_stats_push(self) -> dict[str, Any] | None:
+        payload = self.build_game_stats_payload()
+        if payload is None:
+            return None
+        _record_game_history(payload)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return payload
+        asyncio.create_task(push_game_stats_async(payload))
+        return payload
+
+    def finalize_and_push_stats(self) -> dict[str, Any] | None:
+        if not self.current_game_id or not self.game_player_stats:
+            return None
+        if self.game_ended_at is None:
+            self.game_ended_at = time.monotonic()
+        if not self.game_timestamp_str:
+            self.game_timestamp_str = _now_quebec_str()
+        for stat in self.game_player_stats.values():
+            if stat["ended_at"] is None:
+                stat["ended_at"] = self.game_ended_at
+        self.game_logged = True
+        return self.trigger_stats_push()
+
     def start_game(self) -> None:
         self.refresh_category_locks()
         self.apply_votes()
@@ -348,6 +580,23 @@ class Room:
         self.played_categories.add(self.category)
         self.last_game_players = {p.id for p in self.joined_players() if p.ws is not None}
         self.game_had_players = bool(self.joined_players())
+        now_mono = time.monotonic()
+        self.current_game_id = f"{self.code}-{int(time.time() * 1000)}"
+        self.game_started_at = now_mono
+        self.game_ended_at = None
+        self.game_timestamp_str = ""
+        self.game_shares_count = 0
+        self.game_logged = False
+        self.game_player_stats = {
+            p.id: {
+                "name": p.name,
+                "joined_at": now_mono,
+                "ended_at": None,
+                "questions_answered": 0,
+                "shares": 0,
+            }
+            for p in self.joined_players()
+        }
         for p in self.players.values():
             p.reset_stats()
             p.vote_category = None
@@ -357,6 +606,7 @@ class Room:
         p = self.players.get(pid)
         if p is None:
             return False
+        self.mark_player_left_game(pid)
         if p.ws is not None:
             self.pending_kicks.append((p.ws, reason))
             p.name = ""
@@ -391,6 +641,7 @@ class Room:
                     self.players.pop(pid, None)
                     changed = True
                 elif p.disconnected_at is not None and (now - p.disconnected_at) >= grace:
+                    self.mark_player_left_game(pid)
                     self.players.pop(pid, None)
                     changed = True
         if changed:
@@ -473,6 +724,10 @@ class Room:
             if p.answer is not None and 0 <= p.answer < 4:
                 answered_count += 1
                 p.missed_streak = 0
+                if p.id not in self.game_player_stats:
+                    self.register_player_in_game(p)
+                if p.id in self.game_player_stats:
+                    self.game_player_stats[p.id]["questions_answered"] += 1
                 self.counts[p.answer] += 1
                 self.choice_players[p.answer].append(
                     {"id": p.id, "name": p.name, "avatar": p.avatar}
@@ -663,11 +918,20 @@ class Room:
             )
 
     def back_to_lobby(self) -> None:
+        if not self.game_logged and self.game_player_stats:
+            self.finalize_and_push_stats()
         self.questions = []
         self.q_index = -1
         self.fastest_record = None
         self.round_events = []
         self.game_had_players = False
+        self.current_game_id = ""
+        self.game_started_at = None
+        self.game_ended_at = None
+        self.game_timestamp_str = ""
+        self.game_player_stats = {}
+        self.game_shares_count = 0
+        self.game_logged = False
         for pid, p in list(self.players.items()):
             if p.ws is None:
                 self.players.pop(pid, None)
@@ -695,6 +959,7 @@ class Room:
                     self.set_phase("QUESTION", QUESTION_DURATION)
             else:
                 self.set_phase("PODIUM", PODIUM_DURATION)
+                self.finalize_and_push_stats()
         elif self.phase == "INTER_PODIUM":
             self.q_index += 1
             for p in self.players.values():
@@ -781,6 +1046,9 @@ class Room:
             "answered_count": sum(1 for p in joined if p.answer is not None),
             "players": [self._public_player(p) for p in joined],
             "leaderboard": [self._public_player(p) for p in self.leaderboard()],
+            "sheets_webhook_set": bool(get_sheets_webhook_url()),
+            "sheets_url": GOOGLE_SHEET_URL,
+            "last_push_status": LAST_PUSH_STATUS,
         }
 
     def player_state(self, p: Player) -> dict[str, Any]:
@@ -1084,6 +1352,69 @@ async def api_photobooth(
     }
 
 
+@app.get("/api/stats")
+async def api_stats() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "sheet_id": GOOGLE_SHEET_ID,
+        "sheet_url": GOOGLE_SHEET_URL,
+        "webhook_configured": bool(get_sheets_webhook_url()),
+        "last_push_status": LAST_PUSH_STATUS,
+        "headers": STATS_HEADERS,
+        "count": len(GAME_LOGS_HISTORY),
+        "history": list(reversed(GAME_LOGS_HISTORY[-50:])),
+    }
+
+
+@app.post("/api/stats/config")
+async def api_stats_config(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    raw_url = str(body.get("webhook_url") or "")
+    try:
+        saved = set_sheets_webhook_url(raw_url)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {
+        "ok": True,
+        "webhook_configured": bool(saved or get_sheets_webhook_url()),
+        "sheet_url": GOOGLE_SHEET_URL,
+    }
+
+
+@app.post("/api/stats/test")
+async def api_stats_test() -> dict[str, Any]:
+    test_payload = {
+        "game_id": f"TEST-{int(time.time() * 1000)}",
+        "sheet_id": GOOGLE_SHEET_ID,
+        "category": "Test",
+        "difficulty": "standard",
+        "row": [
+            _now_quebec_str(),
+            "127.0.0.1",
+            2,
+            "14 moy. (Test1: 15/15, Test2: 13/15)",
+            "3m 45s moy. (Test1: 4m 00s, Test2: 3m 30s)",
+            1,
+        ],
+    }
+    status = await push_game_stats_async(test_payload)
+    return {"ok": bool(status.get("ok")), "status": status}
+
+
+@app.get("/api/stats/csv")
+async def api_stats_csv() -> Response:
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf)
+    writer.writerow(STATS_HEADERS)
+    for item in GAME_LOGS_HISTORY:
+        writer.writerow(item.get("row") or [])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="laser-quiz-stats.csv"'},
+    )
+
+
 @app.websocket("/ws/tv")
 async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
     await websocket.accept()
@@ -1096,6 +1427,10 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
             code = generate_code()
         current = Room(code)
         rooms[code] = current
+
+    tv_ip = _extract_client_ip(websocket)
+    if tv_ip and tv_ip != "Inconnue":
+        current.session_ip = tv_ip
 
     current.tvs.add(websocket)
     current.ensure_loop()
@@ -1133,6 +1468,8 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                         current.start_game()
                     await current.broadcast()
             elif cmd == "START_NEXT_CATEGORY":
+                if not current.game_logged and current.game_player_stats:
+                    current.finalize_and_push_stats()
                 current.refresh_category_locks()
                 current.cat_index = CATEGORIES.index(current.next_category)
                 if current.joined_players():
@@ -1146,6 +1483,39 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                     target_id, "Tu as été retiré de la salle par la régie."
                 ):
                     await current.broadcast()
+            elif cmd == "SET_SHEETS_WEBHOOK":
+                global LAST_PUSH_STATUS
+                try:
+                    saved = set_sheets_webhook_url(str(msg.get("webhook_url") or ""))
+                    LAST_PUSH_STATUS = {
+                        "ok": True if saved else None,
+                        "message": "Webhook enregistré" if saved else "Webhook vidé (var env utilisée)",
+                        "at": _now_quebec_str(),
+                    }
+                except ValueError as err:
+                    LAST_PUSH_STATUS = {
+                        "ok": False,
+                        "message": str(err),
+                        "at": _now_quebec_str(),
+                    }
+                await current.broadcast()
+            elif cmd == "TEST_SHEETS_PUSH":
+                test_payload = {
+                    "game_id": f"TEST-{int(time.time() * 1000)}",
+                    "sheet_id": GOOGLE_SHEET_ID,
+                    "category": current.category,
+                    "difficulty": current.active_difficulty,
+                    "row": [
+                        _now_quebec_str(),
+                        current.session_ip or _extract_client_ip(websocket),
+                        max(1, len(current.joined_players())),
+                        "14 moy. (Test1: 15/15, Test2: 13/15)",
+                        "3m 45s moy. (Test1: 4m 00s, Test2: 3m 30s)",
+                        1,
+                    ],
+                }
+                await push_game_stats_async(test_payload)
+                await current.broadcast()
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -1163,6 +1533,9 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
         await websocket.close(code=4404)
         return
 
+    if not room.session_ip:
+        room.session_ip = _extract_client_ip(websocket)
+
     pid = re.sub(r"[^A-Za-z0-9_-]", "", player_id)[:64] or generate_code()
     player = room.players.get(pid)
     if player is None:
@@ -1178,6 +1551,8 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
 
     player.ws = websocket
     player.disconnected_at = None
+    if player.joined:
+        room.register_player_in_game(player)
     room.ensure_loop()
     room.refresh_category_locks()
     room.apply_votes()
@@ -1212,11 +1587,13 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                         player.vote_category = vote_cat
                     elif vote_cat is None or vote_cat == "":
                         player.vote_category = None
+                room.register_player_in_game(player)
                 room.refresh_category_locks()
                 room.apply_votes()
                 await room.broadcast()
 
             elif kind == "LEAVE":
+                room.mark_player_left_game(pid)
                 player.name = ""
                 player.vote_category = None
                 player.disconnected_at = None
@@ -1258,6 +1635,13 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                     if room.all_answered():
                         room.reveal()
                     await room.broadcast()
+
+            elif kind == "SHARE":
+                if player.joined and room.phase == "PODIUM":
+                    room.game_shares_count += 1
+                    if pid in room.game_player_stats:
+                        room.game_player_stats[pid]["shares"] += 1
+                    room.trigger_stats_push()
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -1265,6 +1649,8 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
     finally:
         if player.ws is websocket:
             player.ws = None
+            if player.joined:
+                room.mark_player_left_game(pid)
             if not player.joined:
                 room.players.pop(pid, None)
             else:

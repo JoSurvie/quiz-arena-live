@@ -11,9 +11,10 @@
 
 | Fichier | Rôle principal | Détails clés |
 | --- | --- | --- |
-| [server.py](server.py) | Serveur FastAPI, boucle d'horloge, WebSockets, proxy Simple Booth | Titre `FastAPI(title="Laser Quiz")`, gestion des salles (`Room`), joueurs (`Player`), tirage non répétitif, gamification, nettoyage AFK/déconnexion et cache photobooth |
+| [server.py](server.py) | Serveur FastAPI, boucle d'horloge, WebSockets, proxy Simple Booth & push Google Sheets | Titre `FastAPI(title="Laser Quiz")`, gestion des salles (`Room`), joueurs (`Player`), tirage non répétitif, gamification, nettoyage AFK/déconnexion, cache photobooth et suivi KPI fin de partie |
 | [static/index.html](static/index.html) | Interface SPA unique (mode TV et mode Mobile) | Routage automatique par URL (`?room=XXXXX` -> `initPlayer()`, sinon `initTV()`). Stack CDN : Tailwind CSS (`https://cdn.tailwindcss.com`), QRCode.js (`1.0.0`), `canvas-confetti` (`1.9.3`) |
 | [questions.json](questions.json) | Banque de questions structurée | **300 questions uniques** : 5 catégories de base × 2 niveaux (`standard` et `debutant`) × 30 questions |
+| [google_sheets_webhook.gs](google_sheets_webhook.gs) | Script Google Apps Script (Webhook Drive) | À coller dans *Extensions → Apps Script* du Google Sheet cible (`1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI`) pour recevoir et mettre à jour les 6 colonnes KPI automatiquement |
 | [requirements.txt](requirements.txt) | Dépendances Python | `fastapi==0.115.0`, `uvicorn[standard]==0.30.6`, `websockets==13.1` |
 | [.gitignore](.gitignore) | Exclusions Git | `__pycache__/`, `*.py[cod]`, `.venv/`, `venv/`, `.env`, `.DS_Store` |
 
@@ -209,17 +210,41 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 
 ---
 
-## 9. Référence API (HTTP, WebSocket & Stockage client)
+## 9. Logging des KPI & Export automatique Google Sheets (Drive)
+
+À la fin de chaque manche (entrée en `PODIUM`, ou retour anticipé au `LOBBY` si une partie active s'arrête), `Room.finalize_and_push_stats()` collecte les indicateurs de la partie et les pousse automatiquement via HTTPS `POST` vers le webhook Google Apps Script ([google_sheets_webhook.gs](google_sheets_webhook.gs)) lié au classeur cible (`GOOGLE_SHEET_ID = "1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI"`, `gid = 0`).
+
+### Ordre exact des 6 colonnes enregistrées
+1. **`Horodatage`** : date et heure locale Québec (`America/Toronto`, format `YYYY-MM-DD HH:MM:SS`).
+2. **`Adresse IP de la session`** : adresse IP publique extraite des en-têtes proxy Render (`x-forwarded-for`, `x-real-ip` ou `websocket.client.host`).
+3. **`Nombre de joueurs`** : total de joueurs distincts ayant participé à la manche.
+4. **`Nombre de questions répondues par joueur`** : moyenne + détail individuel (ex. `13.5 moy. (Alice: 15/15, Bob: 12/15)`).
+5. **`Temps de jeu par joueur`** : durée moyenne + détail individuel entre l'entrée et la sortie/fin (ex. `4m 05s moy. (Alice: 4m 30s, Bob: 3m 40s)`).
+6. **`Combien de partages de stats`** : compteur cumulé des partages déclenchés en phase `PODIUM` (`SHARE` sur `X`, `FB`, `WA`, `Copier` ou partage natif).
+
+### Mise à jour en temps réel (`upsert` par `game_id`) & Configuration
+- Si un joueur clique sur un bouton de partage pendant les 60 s du `PODIUM`, le serveur appelle à nouveau `trigger_stats_push()` avec le même `game_id` : `doPost()` dans [google_sheets_webhook.gs](google_sheets_webhook.gs) utilise `LockService` et `PropertiesService` pour mettre à jour la ligne existante (colonne 6) sans créer de doublon.
+- **Configuration du Webhook** :
+  - **Recommandé sur Render (persistant)** : définir la variable d'environnement `GOOGLE_SHEETS_WEBHOOK_URL` avec l'URL `/exec` du déploiement Web App Apps Script.
+  - **Depuis la Régie TV (`⚙️`)** : l'encart **📊 Stats Google Drive** permet d'ouvrir le Sheet, télécharger l'historique local (`/api/stats/csv`), enregistrer/tester l'URL Webhook (`SET_SHEETS_WEBHOOK` / `TEST_SHEETS_PUSH`) et consulter le statut du dernier envoi (`#sheets-status`).
+
+---
+
+## 10. Référence API (HTTP, WebSocket & Stockage client)
 
 ### Routes HTTP
 - `GET /` — Sert [static/index.html](static/index.html)
 - `GET /health` — Sonde de santé serveur (pour Render / monitoring)
 - `GET /api/photobooth?url=...&limit=18&order=asc&force=0` — Proxy JSON Simple Booth avec cache 90 s
+- `GET /api/stats` — État de configuration Google Sheets et 50 dernières parties en mémoire (`GAME_LOGS_HISTORY`)
+- `POST /api/stats/config` — Configure `webhook_url` dans `stats_config.json`
+- `POST /api/stats/test` — Pousse une ligne de test vers le Google Sheet
+- `GET /api/stats/csv` — Téléchargement CSV (UTF-8 BOM) des parties enregistrées en mémoire
 
 ### WebSocket TV : `/ws/tv?room=XXXXX`
 - **Serveur → TV** :
   - `{"type": "room", "room": "XXXXX"}` à la connexion
-  - `{"type": "state", ...}` à chaque tick ou transition (inclut `phase`, `timer`, `duration`, `speed`, `cat_index`, `voting_enabled`, `available_categories`, `played_categories`, `active_difficulty`, `beginner_stats`, `players`, `question`, `counts`, `choice_players`, `round_events`, etc.)
+  - `{"type": "state", ...}` à chaque tick ou transition (inclut `phase`, `timer`, `duration`, `speed`, `cat_index`, `voting_enabled`, `available_categories`, `played_categories`, `active_difficulty`, `beginner_stats`, `players`, `question`, `counts`, `choice_players`, `round_events`, `sheets_webhook_set`, `sheets_url`, `last_push_status`, etc.)
 - **TV / Régie → Serveur** :
   - `{"type": "NEXT"}` — Force la transition vers l'étape suivante
   - `{"type": "TOGGLE_SPEED"}` — Bascule `speed` entre `1` et `5`
@@ -227,6 +252,8 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
   - `{"type": "SELECT_CATEGORY", "category": "...", "index": ..., "start": true/false}` — Sélectionne une catégorie (et démarre éventuellement la partie)
   - `{"type": "START_NEXT_CATEGORY"}` — Enchaîne sur une nouvelle catégorie
   - `{"type": "KICK_PLAYER", "player_id": "..."}` — Expulse le joueur ciblé
+  - `{"type": "SET_SHEETS_WEBHOOK", "webhook_url": "..."}` — Enregistre l'URL du Web App Google Apps Script
+  - `{"type": "TEST_SHEETS_PUSH"}` — Déclenche un envoi de test vers Google Sheets
 
 ### WebSocket Joueur : `/ws/player/{room_code}/{player_id}`
 - **Serveur → Joueur** :
@@ -237,6 +264,7 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
   - `{"type": "JOIN", "name": "...", "avatar": "...", "beginner": true/false, "vote_category": "..."}` (champ `category` également accepté)
   - `{"type": "VOTE", "beginner": true/false, "category": "..."}`
   - `{"type": "ANSWER", "choice": 0..3}`
+  - `{"type": "SHARE", "channel": "native|x|facebook|whatsapp|copy"}` — Comptabilise un partage de score en phase `PODIUM` et met à jour le Google Sheet
   - `{"type": "LEAVE"}`
 
 ### Stockage local navigateur
@@ -251,7 +279,7 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 
 ---
 
-## 10. Commandes d'exploitation & Déploiement (Local, Render, GitHub)
+## 11. Commandes d'exploitation & Déploiement (Local, Render, GitHub)
 
 ### Lancement en local
 ```powershell
@@ -265,7 +293,8 @@ uvicorn server:app --host 0.0.0.0 --port 8000
 - **Build Command** : `pip install -r requirements.txt`
 - **Start Command** : ``uvicorn server:app --host 0.0.0.0 --port $PORT``
 - **Health Check Path** : `/health`
+- **Variable d'environnement recommandée** : `GOOGLE_SHEETS_WEBHOOK_URL` = URL `/exec` de la Web App déployée depuis [google_sheets_webhook.gs](google_sheets_webhook.gs) (garantit la persistance même après redémarrage Render)
 
 ### Synchronisation GitHub (`JoSurvie/quiz-arena-live`)
-- La branche contenant toutes les évolutions (Photobooth, 300 questions, Gamification, Anti-AFK, Mix Aléatoire, Optimisations Samsung TV) est **`merge-photobooth`**.
+- La branche contenant toutes les évolutions (Photobooth, 300 questions, Gamification, Anti-AFK, Mix Aléatoire, Optimisations Samsung TV, Export KPI Google Sheets) est **`merge-photobooth`**.
 - Vérifier avant tout déploiement Render que la branche déployée pointe bien sur `merge-photobooth` (ou fusionner `merge-photobooth` dans `main`).
