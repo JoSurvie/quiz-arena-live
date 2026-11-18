@@ -1,4 +1,5 @@
-<!DOCTYPE html>
+
++<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
@@ -56,6 +57,30 @@
       will-change: transform;
       animation: marqueeLeftToRight var(--pb-duration, 160s) linear infinite;
     }
+    @keyframes flamePulse {
+      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(251, 146, 60, .65)); }
+      50% { transform: scale(1.05); filter: drop-shadow(0 0 18px rgba(250, 204, 21, .95)); }
+    }
+    @keyframes iceShake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-5px) rotate(-1.5deg); }
+      40% { transform: translateX(5px) rotate(1.5deg); }
+      60% { transform: translateX(-4px); }
+      80% { transform: translateX(4px); }
+    }
+    @keyframes speedFlash {
+      0% { transform: translateX(-24px) skewX(-8deg); opacity: 0; }
+      60% { transform: translateX(4px) skewX(-2deg); opacity: 1; }
+      100% { transform: translateX(0) skewX(0); opacity: 1; }
+    }
+    @keyframes eventSlideIn {
+      0% { transform: translateY(-14px) scale(.92); opacity: 0; }
+      100% { transform: translateY(0) scale(1); opacity: 1; }
+    }
+    .anim-flame { animation: flamePulse 1.3s ease-in-out infinite; }
+    .anim-ice { animation: iceShake .65s ease-in-out 2; }
+    .anim-speed { animation: speedFlash .55s cubic-bezier(.22,1,.36,1) both; }
+    .anim-event { animation: eventSlideIn .45s cubic-bezier(.22,1,.36,1) both; }
   </style>
 </head>
 <body class="text-white antialiased">
@@ -139,10 +164,14 @@
         const raw = getCookie("lge_pb_opts");
         const parsed = raw ? JSON.parse(raw) : null;
         if (parsed && typeof parsed === "object") {
-          return { speedSec: Number(parsed.speedSec) || 4, order: parsed.order === "desc" ? "desc" : "asc" };
+          return {
+            enabled: parsed.enabled !== false,
+            speedSec: Number(parsed.speedSec) || 4,
+            order: parsed.order === "desc" ? "desc" : "asc"
+          };
         }
       } catch (_) {}
-      return { speedSec: 4, order: "asc" };
+      return { enabled: true, speedSec: 4, order: "asc" };
     })();
     let pbSelectedStore = getCookie("lge_pb_store") || pbStores[0].name;
     if (!pbStores.some(s => s.name === pbSelectedStore)) pbSelectedStore = pbStores[0].name;
@@ -169,6 +198,7 @@
       }
     }
     async function loadPhotobooth(force = false) {
+      if (!force && !pbOpts.enabled) return;
       const store = currentStore();
       if (!store || !store.url) {
         pbPhotos = [];
@@ -262,6 +292,7 @@
             <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📸 Photobooth (Cookie local)</span>
             <button id="pb-refresh" title="Rafraîchir les photos" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-2 py-1">🔄 Actualiser</button>
           </div>
+          <button id="btn-pb-toggle" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition bg-emerald-600/80 hover:bg-emerald-600">👁️ Photobooth : Affiché</button>
           <select id="pb-store-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-sm font-bold text-white outline-none"></select>
           <div class="grid grid-cols-2 gap-2">
             <select id="pb-speed-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
@@ -306,12 +337,32 @@
     };
     $("pb-refresh").onclick = () => loadPhotobooth(true);
 
+    function applyPhotoboothVisibility() {
+      const btn = $("btn-pb-toggle");
+      if (btn) {
+        btn.textContent = pbOpts.enabled ? "👁️ Photobooth : Affiché" : "🙈 Photobooth : Masqué";
+        btn.className = `w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition ${
+          pbOpts.enabled ? "bg-emerald-600/80 hover:bg-emerald-600" : "bg-slate-700 hover:bg-slate-600 text-white/80"
+        }`;
+      }
+      const sec = $("pb-section");
+      if (sec) sec.classList.toggle("hidden", !pbOpts.enabled);
+    }
+
+    $("btn-pb-toggle").onclick = () => {
+      pbOpts.enabled = !pbOpts.enabled;
+      saveOptsCookie();
+      applyPhotoboothVisibility();
+      if (pbOpts.enabled && !pbPhotos.length) loadPhotobooth(false);
+    };
+
     function syncStoreSelect() {
       const sel = $("pb-store-select");
       if (!sel) return;
       sel.innerHTML = pbStores.map(s => `<option value="${esc(s.name)}" ${s.name === pbSelectedStore ? "selected" : ""}>${esc(s.name)}</option>`).join("");
       $("pb-speed-select").value = String(pbOpts.speedSec);
       $("pb-order-select").value = pbOpts.order;
+      applyPhotoboothVisibility();
     }
     function renderStoresEditor() {
       const box = $("pb-stores-editor");
@@ -448,14 +499,27 @@
     function send(type, extra = {}) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...extra })); }
     connect();
 
+    function eventCardClass(kind) {
+      if (kind === "STREAK_15") return "bg-gradient-to-r from-amber-300 via-yellow-200 to-orange-400 text-slate-950 border-2 border-white anim-flame";
+      if (kind === "STREAK_10") return "bg-gradient-to-r from-fuchsia-600 to-amber-500 text-white border border-amber-200/50 anim-flame";
+      if (kind === "STREAK_5") return "bg-gradient-to-r from-orange-500 to-rose-500 text-white border border-amber-200/40 anim-flame";
+      if (kind === "WRONG_5") return "bg-gradient-to-r from-sky-700 to-cyan-500 text-white border border-cyan-200/40 anim-ice";
+      if (kind === "FASTEST_RECORD") return "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white border border-cyan-200/50 anim-speed";
+      if (kind === "LONE_WOLF") return "bg-gradient-to-r from-purple-700 to-rose-600 text-white border border-rose-200/40 anim-event";
+      return "bg-gradient-to-r from-emerald-600 to-teal-500 text-white border border-white/25 anim-event";
+    }
+
     // --- Rendu -------------------------------------------------------------
     function render() {
       const key = `${state.room}|${state.phase}|${state.q_index}`;
       if (key !== lastKey) {
         lastKey = key;
         buildView();
+        const evs = state.round_events || [];
+        const hasBigEvent = state.phase === "REVEAL" && evs.some(e => ["STREAK_5", "STREAK_10", "STREAK_15", "FASTEST_RECORD", "LONE_WOLF"].includes(e.kind));
         if (state.phase === "PODIUM") fireConfetti(6000);
         else if (state.phase === "INTER_PODIUM") fireConfetti(2200);
+        else if (hasBigEvent) fireConfetti(1600);
         else stopConfetti();
       }
       updateDynamic();
@@ -514,7 +578,7 @@
                 <div id="player-list" class="grid grid-cols-2 xl:grid-cols-3 gap-2.5 overflow-y-auto content-start flex-1 min-h-0"></div>
               </div>
             </div>
-            <section class="h-48 xl:h-56 w-full bg-slate-950/70 border-t border-white/15 relative overflow-hidden flex items-center shrink-0">
+            <section id="pb-section" class="${pbOpts.enabled ? "" : "hidden"} h-48 xl:h-56 w-full bg-slate-950/70 border-t border-white/15 relative overflow-hidden flex items-center shrink-0">
               <div class="absolute top-2 left-4 z-10 inline-flex items-center gap-2 bg-slate-950/85 border border-white/15 backdrop-blur px-3 py-1 rounded-full text-xs font-bold shadow">
                 <span>📸 Photobooth — <span id="pb-store-label" class="text-amber-300"></span></span>
                 <span class="opacity-50">·</span>
@@ -525,6 +589,7 @@
           </div>`;
         pbTrackKey = "";
         renderPhotoboothStrip(true);
+        applyPhotoboothVisibility();
         const box = $("big-qr");
         box.innerHTML = "";
         new QRCode(box, { text: joinUrl(), width: 512, height: 512, colorDark: "#1e1b4b", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
@@ -557,14 +622,27 @@
       } else if (s.phase === "REVEAL" && s.question) {
         const choicePlayers = s.choice_players || [[], [], [], []];
         const total = Math.max(1, choicePlayers.reduce((a, b) => a + b.length, 0));
+        const evs = s.round_events || [];
+        const fastRec = s.fastest_record;
         main.innerHTML = `
-          <div class="h-full flex flex-col px-8 pb-6 gap-5">
+          <div class="h-full flex flex-col px-8 pb-4 gap-3">
             <div class="flex items-center justify-between text-xl">
               <span class="bg-white/15 rounded-full px-4 py-1 font-bold">${catIcon(s.question.category)} ${esc(s.question.category)}</span>
               <span class="opacity-80">Question <b>${s.q_index + 1}</b> / ${s.q_total}</span>
               <span class="opacity-80">Suite dans <b id="timer"></b> s</span>
             </div>
-            <h1 class="text-3xl md:text-5xl font-extrabold text-center leading-tight">${esc(s.question.q)}</h1>
+            <h1 class="text-3xl md:text-4xl font-extrabold text-center leading-tight">${esc(s.question.q)}</h1>
+            ${evs.length ? `
+              <div id="gamification-banner" class="flex flex-wrap items-center justify-center gap-2.5">
+                ${evs.slice(0, 4).map(ev => `
+                  <div class="${eventCardClass(ev.kind)} rounded-2xl px-4 py-2 shadow-xl flex items-center gap-3">
+                    <span class="text-3xl">${esc(ev.icon)}</span>
+                    <div class="leading-tight">
+                      <div class="text-xs font-black uppercase tracking-wider">${esc(ev.title)}</div>
+                      <div class="text-sm font-bold">${esc(ev.avatar)} ${esc(ev.name)} — <span class="font-normal opacity-95">${esc(ev.subtitle)}</span></div>
+                    </div>
+                  </div>`).join("")}
+              </div>` : ""}
             <div class="flex-1 min-h-0 grid lg:grid-cols-3 gap-6">
               <div class="lg:col-span-2 grid grid-cols-2 gap-4 content-center">
                 ${s.question.options.map((o, i) => {
@@ -591,21 +669,40 @@
                   </div>`;
                 }).join("")}
               </div>
-              <div class="bg-white/10 rounded-3xl p-5 overflow-y-auto">
-                <h3 class="text-2xl font-bold mb-3">🏅 Classement</h3>
-                ${s.leaderboard.length ? s.leaderboard.slice(0, 8).map((p, i) => `
-                  <div class="flex items-center gap-3 py-2 border-b border-white/10 pop">
-                    <span class="w-8 text-xl font-black text-amber-300">${i + 1}</span>
-                    <span class="text-3xl">${esc(p.avatar)}</span>
-                    <span class="flex-1 text-xl font-semibold truncate">${esc(p.name)}</span>
-                    <span class="text-sm ${p.last_correct ? "text-emerald-300" : "text-rose-300"}">${p.last_correct ? "+" + p.last_points : "+0"}</span>
-                    <span class="text-xl font-bold w-20 text-right">${p.score}</span>
-                  </div>`).join("") : `<div class="opacity-60">Aucun joueur</div>`}
+              <div class="bg-white/10 rounded-3xl p-5 flex flex-col justify-between overflow-y-auto">
+                <div>
+                  <h3 class="text-2xl font-bold mb-2">🏅 Classement</h3>
+                  ${s.leaderboard.length ? s.leaderboard.slice(0, 8).map((p, i) => {
+                    const streakChip = p.correct_streak >= 15 ? `<span class="text-xs font-black bg-amber-300 text-slate-950 rounded-full px-2 py-0.5 anim-flame">👑15</span>`
+                      : p.correct_streak >= 10 ? `<span class="text-xs font-black bg-fuchsia-500 text-white rounded-full px-2 py-0.5 anim-flame">⚡${p.correct_streak}</span>`
+                      : p.correct_streak >= 3 ? `<span class="text-xs font-black bg-orange-500 text-white rounded-full px-2 py-0.5 ${p.correct_streak >= 5 ? "anim-flame" : ""}">🔥${p.correct_streak}</span>`
+                      : p.wrong_streak >= 5 ? `<span class="text-xs font-black bg-cyan-600 text-white rounded-full px-2 py-0.5 anim-ice">🧊${p.wrong_streak}</span>` : "";
+                    return `
+                    <div class="flex items-center gap-2 py-2 border-b border-white/10 pop">
+                      <span class="w-7 text-xl font-black text-amber-300">${i + 1}</span>
+                      <span class="text-2xl">${esc(p.avatar)}</span>
+                      <span class="flex-1 text-lg font-semibold truncate">${esc(p.name)}</span>
+                      ${streakChip}
+                      <span class="text-xs ${p.last_correct ? "text-emerald-300" : "text-rose-300"}">${p.last_correct ? "+" + p.last_points : "+0"}</span>
+                      <span class="text-lg font-bold w-16 text-right">${p.score}</span>
+                    </div>`;
+                  }).join("") : `<div class="opacity-60">Aucun joueur</div>`}
+                </div>
+                ${fastRec ? `
+                  <div class="mt-3 bg-indigo-950/60 border border-cyan-300/35 rounded-2xl px-3.5 py-2 flex items-center gap-2.5 text-sm">
+                    <span class="text-2xl">🚀</span>
+                    <div class="leading-tight flex-1 truncate">
+                      <div class="text-[10px] uppercase tracking-wider text-cyan-200 font-bold">Record de vitesse</div>
+                      <div class="font-bold truncate">${esc(fastRec.avatar)} ${esc(fastRec.name)} · <span class="text-amber-300">${Number(fastRec.time).toFixed(2)}s</span></div>
+                    </div>
+                  </div>` : ""}
               </div>
             </div>
           </div>`;
       } else if (s.phase === "INTER_PODIUM") {
         const b = s.leaderboard;
+        const fastRec = s.fastest_record;
+        const streakRec = s.best_streak_record;
         main.innerHTML = `
           <div class="h-full flex flex-col px-8 pb-6 gap-4">
             <div class="flex items-center justify-between text-xl">
@@ -617,8 +714,13 @@
             </div>
             <div class="h-2.5 bg-white/10 rounded-full overflow-hidden"><div id="bar" class="h-full bg-amber-300 transition-all duration-1000 ease-linear" style="width:100%"></div></div>
             <div class="flex-1 min-h-0 grid lg:grid-cols-3 gap-6 items-center">
-              <div class="lg:col-span-2 h-full flex flex-col items-center justify-end pb-4">
+              <div class="lg:col-span-2 h-full flex flex-col items-center justify-end pb-2 gap-4">
                 ${b.length ? podiumHtml(b, ["h-52", "h-36", "h-24"]) : `<div class="text-2xl opacity-60 my-auto">En attente des joueurs…</div>`}
+                ${(fastRec || streakRec) ? `
+                  <div class="flex flex-wrap justify-center gap-3">
+                    ${fastRec ? `<div class="bg-indigo-900/60 border border-cyan-300/40 rounded-full px-4 py-1.5 text-sm font-bold">🚀 Plus rapide : ${esc(fastRec.avatar)} ${esc(fastRec.name)} (${Number(fastRec.time).toFixed(2)}s)</div>` : ""}
+                    ${streakRec ? `<div class="bg-orange-900/50 border border-amber-300/40 rounded-full px-4 py-1.5 text-sm font-bold">🔥 Meilleure série : ${esc(streakRec.avatar)} ${esc(streakRec.name)} (${streakRec.streak} d'affilée)</div>` : ""}
+                  </div>` : ""}
               </div>
               <div class="bg-white/10 rounded-3xl p-5 h-full overflow-y-auto">
                 <h3 class="text-2xl font-bold mb-3">📊 Classement actuel</h3>
@@ -634,6 +736,8 @@
           </div>`;
       } else if (s.phase === "PODIUM") {
         const b = s.leaderboard;
+        const fastRec = s.fastest_record;
+        const streakRec = s.best_streak_record;
         main.innerHTML = `
           <div class="h-full flex flex-col items-center justify-between px-8 pb-4">
             <div class="text-center">
@@ -642,10 +746,15 @@
               <div class="opacity-70 mt-1">Nouveau lobby dans <b id="timer"></b> s</div>
             </div>
             <div class="flex-1 flex items-end justify-center mt-2">
-              ${b.length ? podiumHtml(b, ["h-48", "h-36", "h-24"]) : `<div class="text-2xl opacity-60 self-center">Aucun joueur cette fois-ci 😢</div>`}
+              ${b.length ? podiumHtml(b, ["h-44", "h-32", "h-20"]) : `<div class="text-2xl opacity-60 self-center">Aucun joueur cette fois-ci 😢</div>`}
             </div>
-            ${b.length > 3 ? `<div class="my-2 flex flex-wrap justify-center gap-2">
-              ${b.slice(3, 10).map((p, i) => `<div class="bg-white/10 rounded-xl px-3 py-1.5 text-base"><b class="text-amber-300">${i + 4}.</b> ${esc(p.avatar)} ${esc(p.name)} — ${p.score}</div>`).join("")}
+            ${(fastRec || streakRec) ? `
+              <div class="flex flex-wrap justify-center gap-3 my-1">
+                ${fastRec ? `<div class="bg-indigo-900/60 border border-cyan-300/40 rounded-full px-4 py-1 text-sm font-bold anim-speed">🚀 Record vitesse : ${esc(fastRec.avatar)} ${esc(fastRec.name)} (${Number(fastRec.time).toFixed(2)}s)</div>` : ""}
+                ${streakRec ? `<div class="bg-orange-900/50 border border-amber-300/40 rounded-full px-4 py-1 text-sm font-bold anim-flame">🔥 Meilleure série : ${esc(streakRec.avatar)} ${esc(streakRec.name)} (${streakRec.streak} à la suite)</div>` : ""}
+              </div>` : ""}
+            ${b.length > 3 ? `<div class="my-1 flex flex-wrap justify-center gap-2">
+              ${b.slice(3, 10).map((p, i) => `<div class="bg-white/10 rounded-xl px-3 py-1 text-sm"><b class="text-amber-300">${i + 4}.</b> ${esc(p.avatar)} ${esc(p.name)} — ${p.score}</div>`).join("")}
             </div>` : ""}
             <div class="w-full max-w-5xl bg-white/10 border border-amber-300/40 rounded-3xl p-4 mt-2 flex flex-col items-center gap-3 pop">
               <div class="flex flex-wrap items-center justify-center gap-4">
@@ -1098,15 +1207,23 @@
         const noAnswer = s.my_answer === null;
         const ok = s.last_correct === true;
         const bg = ok ? "bg-emerald-600" : (noAnswer ? "bg-slate-700" : "bg-rose-600");
+        const myEvents = (s.round_events || []).filter(ev => ev.player_id === pid);
+        const streakChip = s.my_correct_streak >= 15 ? `<div class="bg-amber-300 text-slate-950 font-black rounded-full px-4 py-1 text-sm anim-flame">👑 15 à la suite — Sans-Faute !</div>`
+          : s.my_correct_streak >= 10 ? `<div class="bg-fuchsia-600 text-white font-black rounded-full px-4 py-1 text-sm anim-flame">⚡ Série Légendaire (${s.my_correct_streak} !)</div>`
+          : s.my_correct_streak >= 5 ? `<div class="bg-orange-500 text-white font-black rounded-full px-4 py-1 text-sm anim-flame">🔥 Série en Feu (${s.my_correct_streak} !)</div>`
+          : s.my_correct_streak >= 2 ? `<div class="bg-black/25 rounded-full px-3 py-1 text-xs font-bold">🔥 Série : ${s.my_correct_streak} d'affilée</div>`
+          : s.my_wrong_streak >= 5 ? `<div class="bg-cyan-700 text-white font-black rounded-full px-4 py-1 text-sm anim-ice">🧊 Coup de Froid (${s.my_wrong_streak} erreurs)</div>` : "";
         main.innerHTML = `
-          <div class="flex-1 ${bg} rounded-3xl flex flex-col items-center justify-center text-center gap-4 p-6 pop">
-            <div class="text-7xl">${ok ? "✅" : (noAnswer ? "⏱️" : "❌")}</div>
+          <div class="flex-1 ${bg} rounded-3xl flex flex-col items-center justify-center text-center gap-3 p-5 pop">
+            <div class="text-6xl">${ok ? "✅" : (noAnswer ? "⏱️" : "❌")}</div>
             <div class="text-3xl font-black">${ok ? "Bonne réponse !" : (noAnswer ? "Temps écoulé !" : "Raté !")}</div>
             <div class="text-5xl font-black">+${s.last_points}</div>
+            ${streakChip}
+            ${myEvents.length ? `<div class="flex flex-wrap justify-center gap-1.5">${myEvents.map(ev => `<span class="bg-black/30 border border-white/25 rounded-full px-3 py-1 text-xs font-bold anim-event">${esc(ev.icon)} ${esc(ev.title)}</span>`).join("")}</div>` : ""}
             ${ans !== null ? `<div class="flex items-center gap-3 bg-black/20 rounded-2xl px-4 py-3">
               <span class="${COLORS[ans]} w-12 h-12 rounded-xl flex items-center justify-center text-3xl">${SHAPES[ans]}</span>
               <span class="text-left font-semibold">${esc(s.question.options[ans])}</span></div>` : ""}
-            <div class="mt-2 text-lg">Score : <b>${s.score}</b> pts · ${s.rank ? `<b>${s.rank}<sup>${s.rank === 1 ? "er" : "e"}</sup></b> / ${s.players_count}` : ""}</div>
+            <div class="mt-1 text-lg">Score : <b>${s.score}</b> pts · ${s.rank ? `<b>${s.rank}<sup>${s.rank === 1 ? "er" : "e"}</sup></b> / ${s.players_count}` : ""}</div>
           </div>`;
         if (ok && navigator.vibrate) navigator.vibrate([60, 40, 60]);
         return;
@@ -1144,14 +1261,38 @@
 
       if (s.phase === "PODIUM") {
         const medal = { 1: "🥇", 2: "🥈", 3: "🥉" }[s.rank] || "🎉";
+        const badges = s.my_badges || [];
+        const rankLabel = s.rank ? `${s.rank}${s.rank === 1 ? "er" : "e"}` : "-";
+        const shareText = `${medal} J'ai terminé ${rankLabel}/${s.players_count} au Laser Quiz (${s.category}) avec ${s.score} pts !${s.my_best_streak >= 3 ? ` 🔥 Série max : ${s.my_best_streak}` : ""}${s.my_fastest_time ? ` 🚀 Éclair : ${Number(s.my_fastest_time).toFixed(2)}s` : ""}`;
+        const shareUrl = window.location.origin;
+
         main.innerHTML = `
           <div class="flex-1 flex flex-col items-center justify-center text-center gap-3 pop py-2">
             <div class="text-6xl">${medal}</div>
             <div class="text-lg opacity-80">Tu termines</div>
             <div class="text-5xl font-black">${s.rank ? `${s.rank}<sup class="text-2xl">${s.rank === 1 ? "er" : "e"}</sup>` : "-"}</div>
             <div class="text-base">sur ${s.players_count} avec <b class="text-amber-300">${s.score} pts</b></div>
+            ${(badges.length || s.my_best_streak >= 2 || s.my_fastest_time) ? `
+              <div class="w-full bg-white/10 rounded-2xl p-2.5 flex flex-wrap justify-center gap-1.5">
+                ${s.my_best_streak >= 2 ? `<span class="bg-orange-500/30 border border-orange-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🔥 Série max : ${s.my_best_streak}</span>` : ""}
+                ${s.my_fastest_time ? `<span class="bg-cyan-500/25 border border-cyan-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🚀 Plus rapide : ${Number(s.my_fastest_time).toFixed(2)}s</span>` : ""}
+                ${badges.map(b => `<span class="bg-amber-400/20 border border-amber-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">${esc(b.icon)} ${esc(b.label)}</span>`).join("")}
+              </div>` : ""}
             <div class="w-full bg-white/10 rounded-2xl p-3 text-left">
               ${s.top3.map((p, i) => `<div class="flex items-center gap-3 py-1"><span>${["🥇", "🥈", "🥉"][i]}</span><span class="text-2xl">${esc(p.avatar)}</span><span class="flex-1 truncate font-semibold">${esc(p.name)}</span><b>${p.score}</b></div>`).join("")}
+            </div>
+            <div class="w-full bg-indigo-950/60 border border-white/15 rounded-2xl p-3 flex flex-col gap-2">
+              <div class="text-xs uppercase tracking-wider opacity-75 font-bold">📣 Partager mon score</div>
+              <button id="share-native" class="w-full rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 font-black py-2.5 text-sm shadow active:scale-95 transition">
+                📲 Partager / Story (Image + Texte)
+              </button>
+              <div class="grid grid-cols-4 gap-1.5 text-xs font-bold">
+                <a target="_blank" rel="noopener" href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}" class="bg-black/60 hover:bg-black/80 rounded-xl py-2 flex items-center justify-center">𝕏</a>
+                <a target="_blank" rel="noopener" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}" class="bg-blue-600/80 hover:bg-blue-600 rounded-xl py-2 flex items-center justify-center">📘 FB</a>
+                <a target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}" class="bg-emerald-600/80 hover:bg-emerald-600 rounded-xl py-2 flex items-center justify-center">💬 WA</a>
+                <button id="share-copy" class="bg-white/15 hover:bg-white/25 rounded-xl py-2">📋 Copier</button>
+              </div>
+              <div id="share-feedback" class="text-[11px] text-emerald-300 h-4"></div>
             </div>
             <div class="w-full bg-amber-400/15 border border-amber-300/40 rounded-2xl px-4 py-2 text-sm">
               Catégorie suivante proposée :<br />
@@ -1161,6 +1302,90 @@
             ${voteSectionHtml(s)}
             <div class="opacity-60 text-sm">Nouvelle partie dans <span id="pl-timer"></span> s</div>
           </div>`;
+
+        async function makeShareCardBlob() {
+          const canvas = document.createElement("canvas");
+          canvas.width = 1080;
+          canvas.height = 1350;
+          const ctx = canvas.getContext("2d");
+          const grad = ctx.createLinearGradient(0, 0, 1080, 1350);
+          grad.addColorStop(0, "#4c1d95");
+          grad.addColorStop(0.5, "#1e1b4b");
+          grad.addColorStop(1, "#0f0a2e");
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 1080, 1350);
+
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "900 68px system-ui, sans-serif";
+          ctx.fillText("LASER QUIZ", 540, 145);
+          ctx.fillStyle = "#fcd34d";
+          ctx.font = "700 32px system-ui, sans-serif";
+          ctx.fillText(`${catIcon(s.category)} ${s.category} · ${s.difficulty === "debutant" ? "Débutant" : "Standard"}`, 540, 210);
+
+          ctx.font = "170px system-ui, sans-serif";
+          ctx.fillText(medal, 540, 440);
+
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "900 64px system-ui, sans-serif";
+          ctx.fillText(`${s.avatar} ${s.name}`, 540, 565);
+
+          ctx.fillStyle = "#fcd34d";
+          ctx.font = "900 130px system-ui, sans-serif";
+          ctx.fillText(`${rankLabel}`, 540, 745);
+          ctx.fillStyle = "rgba(255,255,255,0.75)";
+          ctx.font = "600 38px system-ui, sans-serif";
+          ctx.fillText(`sur ${s.players_count} joueur(s)`, 540, 805);
+
+          ctx.fillStyle = "rgba(255,255,255,0.12)";
+          ctx.fillRect(190, 865, 700, 140);
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "900 76px system-ui, sans-serif";
+          ctx.fillText(`${s.score} pts`, 540, 960);
+
+          const badgeLine = badges.slice(0, 4).map(b => `${b.icon} ${b.label}`).join("   ");
+          ctx.fillStyle = "#a7f3d0";
+          ctx.font = "700 32px system-ui, sans-serif";
+          ctx.fillText(badgeLine || "Laser Game Evolution", 540, 1110);
+
+          ctx.fillStyle = "rgba(255,255,255,0.55)";
+          ctx.font = "600 28px system-ui, sans-serif";
+          ctx.fillText(shareUrl, 540, 1255);
+          return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+        }
+
+        $("share-copy").onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
+            setText("share-feedback", "✅ Texte copié !");
+          } catch (_) {
+            setText("share-feedback", "Copie impossible sur cet appareil.");
+          }
+        };
+        $("share-native").onclick = async () => {
+          try {
+            const blob = await makeShareCardBlob();
+            const file = blob ? new File([blob], "laser-quiz-score.png", { type: "image/png" }) : null;
+            if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+              await navigator.share({ title: "Laser Quiz", text: shareText, files: [file] });
+              setText("share-feedback", "✅ Carte partagée !");
+              return;
+            }
+            if (navigator.share) {
+              await navigator.share({ title: "Laser Quiz", text: shareText, url: shareUrl });
+              setText("share-feedback", "✅ Score partagé !");
+              return;
+            }
+            if (blob) {
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = "laser-quiz-score.png";
+              a.click();
+              setText("share-feedback", "📥 Image téléchargée !");
+            }
+          } catch (_) {}
+        };
+
         bindBeginnerToggle();
         bindVoteButtons(main, (cat) => sendMsg({ type: "VOTE", category: cat }));
         const k = `${s.category}|${s.q_total}|${s.score}`;

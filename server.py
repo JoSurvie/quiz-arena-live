@@ -114,6 +114,11 @@ class Player:
         self.last_correct: bool | None = None
         self.vote_category: str | None = None
         self.beginner = False
+        self.correct_streak = 0
+        self.wrong_streak = 0
+        self.best_streak = 0
+        self.fastest_time: float | None = None
+        self.badges: list[dict[str, str]] = []
 
     @property
     def joined(self) -> bool:
@@ -122,6 +127,21 @@ class Player:
     def reset_round(self) -> None:
         self.answer = None
         self.answer_remaining = 0.0
+
+    def reset_stats(self) -> None:
+        self.score = 0
+        self.last_points = 0
+        self.last_correct = None
+        self.correct_streak = 0
+        self.wrong_streak = 0
+        self.best_streak = 0
+        self.fastest_time = None
+        self.badges = []
+        self.reset_round()
+
+    def award_badge(self, kind: str, icon: str, label: str) -> None:
+        if not any(b["kind"] == kind for b in self.badges):
+            self.badges.append({"kind": kind, "icon": icon, "label": label})
 
 
 class Room:
@@ -142,6 +162,8 @@ class Room:
         self.q_index = -1
         self.counts = [0, 0, 0, 0]
         self.choice_players: list[list[dict[str, Any]]] = [[], [], [], []]
+        self.fastest_record: dict[str, Any] | None = None
+        self.round_events: list[dict[str, Any]] = []
         self.task: asyncio.Task | None = None
         self.last_tick = time.monotonic()
         self.empty_since: float | None = None
@@ -269,14 +291,13 @@ class Room:
         )
         self.questions = random.sample(pool, min(QUESTIONS_PER_GAME, len(pool)))
         self.q_index = 0
+        self.fastest_record = None
+        self.round_events = []
         self.played_categories.add(self.category)
         self.last_game_players = {p.id for p in self.joined_players() if p.ws is not None}
         for p in self.players.values():
-            p.score = 0
-            p.last_points = 0
-            p.last_correct = None
+            p.reset_stats()
             p.vote_category = None
-            p.reset_round()
         self.set_phase("QUESTION", QUESTION_DURATION)
 
     def select_category(
@@ -302,12 +323,56 @@ class Room:
         self.cat_index = target_idx
         return True
 
+    def _make_event(
+        self,
+        kind: str,
+        title: str,
+        subtitle: str,
+        icon: str,
+        p: Player,
+        extra: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "kind": kind,
+            "title": title,
+            "subtitle": subtitle,
+            "icon": icon,
+            "player_id": p.id,
+            "name": p.name,
+            "avatar": p.avatar,
+            "extra": extra,
+        }
+
+    def best_streak_record(self) -> dict[str, Any] | None:
+        best = max(
+            (p for p in self.joined_players() if p.best_streak >= 2),
+            key=lambda p: (p.best_streak, p.score, p.name.lower()),
+            default=None,
+        )
+        if best is None:
+            return None
+        return {
+            "id": best.id,
+            "name": best.name,
+            "avatar": best.avatar,
+            "streak": best.best_streak,
+        }
+
     def reveal(self) -> None:
         q = self.current_question()
+        prev_board = self.leaderboard()
+        prev_ranks = {p.id: idx + 1 for idx, p in enumerate(prev_board)}
+        prev_leader_id = prev_board[0].id if prev_board and prev_board[0].score > 0 else None
+
         self.counts = [0, 0, 0, 0]
         self.choice_players = [[], [], [], []]
+        self.round_events = []
+        correct_players: list[tuple[Player, float]] = []
+        answered_count = 0
+
         for p in sorted(self.joined_players(), key=lambda x: x.name.lower()):
             if p.answer is not None and 0 <= p.answer < 4:
+                answered_count += 1
                 self.counts[p.answer] += 1
                 self.choice_players[p.answer].append(
                     {"id": p.id, "name": p.name, "avatar": p.avatar}
@@ -316,22 +381,181 @@ class Room:
                 ratio = p.answer_remaining / QUESTION_DURATION
                 pts = round(MIN_POINTS + (MAX_POINTS - MIN_POINTS) * ratio)
                 pts = max(MIN_POINTS, min(MAX_POINTS, pts))
+                elapsed = round(max(0.05, QUESTION_DURATION - p.answer_remaining), 2)
                 p.score += pts
                 p.last_points = pts
                 p.last_correct = True
+                p.correct_streak += 1
+                p.wrong_streak = 0
+                p.best_streak = max(p.best_streak, p.correct_streak)
+                if p.fastest_time is None or elapsed < p.fastest_time:
+                    p.fastest_time = elapsed
+                correct_players.append((p, elapsed))
+
+                if p.correct_streak == 15:
+                    p.award_badge("STREAK_15", "👑", "15 à la suite")
+                    self.round_events.append(
+                        self._make_event(
+                            "STREAK_15",
+                            "SANS-FAUTE ABSOLU !",
+                            "15 bonnes réponses d'affilée !",
+                            "👑",
+                            p,
+                            "15/15",
+                        )
+                    )
+                elif p.correct_streak == 10:
+                    p.award_badge("STREAK_10", "⚡", "10 à la suite")
+                    self.round_events.append(
+                        self._make_event(
+                            "STREAK_10",
+                            "SÉRIE LÉGENDAIRE !",
+                            "10 bonnes réponses à la suite !",
+                            "⚡",
+                            p,
+                            "10🔥",
+                        )
+                    )
+                elif p.correct_streak == 5:
+                    p.award_badge("STREAK_5", "🔥", "5 à la suite")
+                    self.round_events.append(
+                        self._make_event(
+                            "STREAK_5",
+                            "SÉRIE EN FEU !",
+                            "5 bonnes réponses à la suite !",
+                            "🔥",
+                            p,
+                            "5🔥",
+                        )
+                    )
+                if p.answer_remaining <= 2.0:
+                    p.award_badge("BUZZER_BEATER", "🍀", "Buzzer beater")
+                    self.round_events.append(
+                        self._make_event(
+                            "BUZZER_BEATER",
+                            "SAUVÉ PAR LE GONG !",
+                            f"Réponse juste à la dernière seconde ({elapsed:.2f}s) !",
+                            "🍀",
+                            p,
+                        )
+                    )
             else:
                 p.last_points = 0
                 p.last_correct = False
+                if p.answer is not None or p.ws is not None:
+                    p.wrong_streak += 1
+                    p.correct_streak = 0
+                    if p.wrong_streak >= 5 and p.wrong_streak % 5 == 0:
+                        p.award_badge("WRONG_5", "🧊", "5 faux d'affilée")
+                        self.round_events.append(
+                            self._make_event(
+                                "WRONG_5",
+                                "COUP DE FROID !",
+                                f"{p.wrong_streak} mauvaises réponses à la suite… courage !",
+                                "🧊",
+                                p,
+                                f"{p.wrong_streak}❄️",
+                            )
+                        )
+
+        if correct_players:
+            correct_players.sort(key=lambda item: (item[1], item[0].name.lower()))
+            fastest_p, fastest_t = correct_players[0]
+            if self.fastest_record is None or fastest_t < self.fastest_record["time"]:
+                self.fastest_record = {
+                    "id": fastest_p.id,
+                    "name": fastest_p.name,
+                    "avatar": fastest_p.avatar,
+                    "time": fastest_t,
+                    "q_index": self.q_index,
+                }
+                fastest_p.award_badge("FASTEST_RECORD", "🚀", f"Éclair {fastest_t:.2f}s")
+                self.round_events.append(
+                    self._make_event(
+                        "FASTEST_RECORD",
+                        "RECORD DE VITESSE !",
+                        f"Réponse juste la plus rapide de la partie ({fastest_t:.2f}s) !",
+                        "🚀",
+                        fastest_p,
+                        f"{fastest_t:.2f}s",
+                    )
+                )
+            elif len(correct_players) >= 2:
+                self.round_events.append(
+                    self._make_event(
+                        "FIRST_BLOOD",
+                        "DÉGAINÉ EN PREMIER !",
+                        f"Plus rapide sur cette question ({fastest_t:.2f}s)",
+                        "🎯",
+                        fastest_p,
+                        f"{fastest_t:.2f}s",
+                    )
+                )
+
+        if answered_count >= 2 and len(correct_players) == 1:
+            lone = correct_players[0][0]
+            lone.award_badge("LONE_WOLF", "💀", "Seul contre tous")
+            self.round_events.append(
+                self._make_event(
+                    "LONE_WOLF",
+                    "SEUL CONTRE TOUS !",
+                    "Unique bonne réponse de la salle !",
+                    "💀",
+                    lone,
+                )
+            )
+
+        if self.q_index > 0:
+            new_board = self.leaderboard()
+            if new_board and new_board[0].score > 0 and prev_leader_id and new_board[0].id != prev_leader_id:
+                leader = new_board[0]
+                leader.award_badge("NEW_LEADER", "🥇", "Prise de pouvoir")
+                self.round_events.append(
+                    self._make_event(
+                        "NEW_LEADER",
+                        "NOUVEAU LEADER !",
+                        "Prend la 1re place du classement !",
+                        "🥇",
+                        leader,
+                    )
+                )
+            for idx, p in enumerate(new_board):
+                old_rank = prev_ranks.get(p.id)
+                if old_rank and (old_rank - (idx + 1)) >= 3 and p.last_correct:
+                    gain = old_rank - (idx + 1)
+                    p.award_badge("COMEBACK", "🦅", "Remontada")
+                    self.round_events.append(
+                        self._make_event(
+                            "COMEBACK",
+                            "REMONTADA !",
+                            f"+{gain} places gagnées sur ce tour !",
+                            "🦅",
+                            p,
+                        )
+                    )
+
+        priority = {
+            "STREAK_15": 0,
+            "STREAK_10": 1,
+            "FASTEST_RECORD": 2,
+            "STREAK_5": 3,
+            "LONE_WOLF": 4,
+            "WRONG_5": 5,
+            "NEW_LEADER": 6,
+            "COMEBACK": 7,
+            "BUZZER_BEATER": 8,
+            "FIRST_BLOOD": 9,
+        }
+        self.round_events.sort(key=lambda ev: priority.get(ev["kind"], 99))
         self.set_phase("REVEAL", REVEAL_DURATION)
 
     def back_to_lobby(self) -> None:
         self.questions = []
         self.q_index = -1
+        self.fastest_record = None
+        self.round_events = []
         for p in self.players.values():
-            p.score = 0
-            p.reset_round()
-            p.last_points = 0
-            p.last_correct = None
+            p.reset_stats()
         self.set_phase("LOBBY", LOBBY_DURATION)
         self.refresh_category_locks()
         self.apply_votes()
@@ -384,6 +608,11 @@ class Room:
             "last_correct": p.last_correct,
             "beginner": p.beginner,
             "vote_category": p.vote_category,
+            "correct_streak": p.correct_streak,
+            "wrong_streak": p.wrong_streak,
+            "best_streak": p.best_streak,
+            "fastest_time": p.fastest_time,
+            "badges": p.badges,
         }
 
     def _question_payload(self, with_answer: bool) -> dict[str, Any] | None:
@@ -428,6 +657,9 @@ class Room:
             "question": self._question_payload(with_answer=reveal),
             "counts": self.counts if reveal else None,
             "choice_players": self.choice_players if reveal else None,
+            "round_events": self.round_events if reveal else [],
+            "fastest_record": self.fastest_record,
+            "best_streak_record": self.best_streak_record(),
             "answered_count": sum(1 for p in joined if p.answer is not None),
             "players": [self._public_player(p) for p in joined],
             "leaderboard": [self._public_player(p) for p in self.leaderboard()],
@@ -473,6 +705,14 @@ class Room:
             "my_answer": p.answer,
             "my_vote": p.vote_category,
             "my_beginner": p.beginner,
+            "my_correct_streak": p.correct_streak,
+            "my_wrong_streak": p.wrong_streak,
+            "my_best_streak": p.best_streak,
+            "my_fastest_time": p.fastest_time,
+            "my_badges": p.badges,
+            "round_events": self.round_events if reveal else [],
+            "fastest_record": self.fastest_record,
+            "best_streak_record": self.best_streak_record(),
             "last_points": p.last_points,
             "last_correct": p.last_correct,
             "top3": [self._public_player(x) for x in board[:3]],
