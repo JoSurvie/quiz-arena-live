@@ -230,7 +230,25 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 
 ---
 
-## 10. Référence API (HTTP, WebSocket & Stockage client)
+## 10. Gestion des utilisateurs (`LGE` / `AdminLGE`) & Blocage de page
+
+- **Compte utilisateur TV `LGE`** (mot de passe initial par défaut : `LGE2026`, surchargeable via `LGE_DEFAULT_PASSWORD`) :
+  - Débloque l'écran d'accueil verrouillé (`#page-lock-overlay`) et lance la session TV/WebSocket (`startTVSession()`).
+  - N'a pas accès au panneau Régie (`POST /api/auth/login` avec `target="regie"` renvoie HTTP `403`).
+- **Compte administrateur Régie `AdminLGE`** (mot de passe temporaire initial : `Admin2026!`, surchargeable via `ADMIN_DEFAULT_PASSWORD`) :
+  - Protège l'ouverture du panneau **Régie (`⚙️`)** via la modale `#admin-modal`.
+  - **Changement obligatoire à la 1ʳᵉ connexion** (`must_change_password = True`) : renvoie un `change_token` temporaire et impose la saisie + confirmation d'un nouveau mot de passe (`POST /api/auth/change-password`) avant d'accéder à la Régie.
+  - Permet également de modifier les mots de passe de `LGE` et `AdminLGE` depuis l'encart **🔐 Sécurité & Utilisateurs** de la Régie (`#pwd-manage-panel`), et débloque automatiquement la page TV.
+- **Sessions permanentes sans limite de temps** :
+  - Les jetons `qal_user_token` et `qal_admin_token` (`localStorage`) sont signés en HMAC-SHA256 (`_make_auth_token`) sans date d'expiration (`exp`) ni déconnexion automatique.
+  - Mots de passe hachés en **PBKDF2-HMAC-SHA256** (100 000 itérations + sel aléatoire) dans `auth_config.json`.
+- **Option de blocage de page en Régie (`#btn-page-lock`)** :
+  - Activée par défaut (`page_lock_enabled = True`).
+  - Basculable en direct depuis la Régie (`TOGGLE_PAGE_LOCK` ou `POST /api/auth/page-lock`) pour imposer ou désactiver le déblocage par `LGE` au chargement de la page TV.
+
+---
+
+## 11. Référence API (HTTP, WebSocket & Stockage client)
 
 ### Routes HTTP
 - `GET /` — Sert [static/index.html](static/index.html)
@@ -240,11 +258,15 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 - `POST /api/stats/config` — Configure `webhook_url` dans `stats_config.json`
 - `POST /api/stats/test` — Pousse une ligne de test vers le Google Sheet
 - `GET /api/stats/csv` — Téléchargement CSV (UTF-8 BOM) des parties enregistrées en mémoire
+- `GET /api/auth/status?user_token=...&admin_token=...` — Statut du blocage de page et validité des jetons permanents
+- `POST /api/auth/login` — Authentifie `LGE` ou `AdminLGE` (retourne `token` permanent ou `change_token` si `must_change_password`)
+- `POST /api/auth/change-password` — Valide le changement de mot de passe (1ʳᵉ connexion ou gestion admin)
+- `POST /api/auth/page-lock` — Active/désactive `page_lock_enabled` (réservé à `AdminLGE`)
 
 ### WebSocket TV : `/ws/tv?room=XXXXX`
 - **Serveur → TV** :
   - `{"type": "room", "room": "XXXXX"}` à la connexion
-  - `{"type": "state", ...}` à chaque tick ou transition (inclut `phase`, `timer`, `duration`, `speed`, `cat_index`, `voting_enabled`, `available_categories`, `played_categories`, `active_difficulty`, `beginner_stats`, `players`, `question`, `counts`, `choice_players`, `round_events`, `sheets_webhook_set`, `sheets_url`, `last_push_status`, etc.)
+  - `{"type": "state", ...}` à chaque tick ou transition (inclut `phase`, `timer`, `duration`, `speed`, `cat_index`, `voting_enabled`, `available_categories`, `played_categories`, `active_difficulty`, `beginner_stats`, `players`, `question`, `counts`, `choice_players`, `round_events`, `sheets_webhook_set`, `sheets_url`, `last_push_status`, `page_lock_enabled`, etc.)
 - **TV / Régie → Serveur** :
   - `{"type": "NEXT"}` — Force la transition vers l'étape suivante
   - `{"type": "TOGGLE_SPEED"}` — Bascule `speed` entre `1` et `5`
@@ -254,6 +276,7 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
   - `{"type": "KICK_PLAYER", "player_id": "..."}` — Expulse le joueur ciblé
   - `{"type": "SET_SHEETS_WEBHOOK", "webhook_url": "..."}` — Enregistre l'URL du Web App Google Apps Script
   - `{"type": "TEST_SHEETS_PUSH"}` — Déclenche un envoi de test vers Google Sheets
+  - `{"type": "TOGGLE_PAGE_LOCK"}` — Active/désactive le blocage de la page TV pour `LGE`
 
 ### WebSocket Joueur : `/ws/player/{room_code}/{player_id}`
 - **Serveur → Joueur** :
@@ -270,6 +293,8 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 ### Stockage local navigateur
 - **`localStorage`** :
   - `qal_tv_room` — Code de la dernière salle TV créée/rejointe
+  - `qal_user_token` — Jeton permanent de session utilisateur (`LGE`)
+  - `qal_admin_token` — Jeton permanent de session Régie (`AdminLGE`)
   - `qal_player_id` — Identifiant unique persistant du joueur sur mobile
   - `qal_profile` — Profil mémorisé du joueur (pseudo, avatar, préférence débutant)
 - **Cookies** :
@@ -279,7 +304,7 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 
 ---
 
-## 11. Commandes d'exploitation & Déploiement (Local, Render, GitHub)
+## 12. Commandes d'exploitation & Déploiement (Local, Render, GitHub)
 
 ### Lancement en local
 ```powershell
@@ -293,8 +318,10 @@ uvicorn server:app --host 0.0.0.0 --port 8000
 - **Build Command** : `pip install -r requirements.txt`
 - **Start Command** : ``uvicorn server:app --host 0.0.0.0 --port $PORT``
 - **Health Check Path** : `/health`
-- **Variable d'environnement recommandée** : `GOOGLE_SHEETS_WEBHOOK_URL` = URL `/exec` de la Web App déployée depuis [google_sheets_webhook.gs](google_sheets_webhook.gs) (garantit la persistance même après redémarrage Render)
+- **Variables d'environnement recommandées** :
+  - `GOOGLE_SHEETS_WEBHOOK_URL` = URL `/exec` de la Web App déployée depuis [google_sheets_webhook.gs](google_sheets_webhook.gs)
+  - Optionnelles : `LGE_DEFAULT_PASSWORD` (`LGE2026`), `ADMIN_DEFAULT_PASSWORD` (`Admin2026!`), `LGE_AUTH_SECRET`
 
 ### Synchronisation GitHub (`JoSurvie/quiz-arena-live`)
-- La branche contenant toutes les évolutions (Photobooth, 300 questions, Gamification, Anti-AFK, Mix Aléatoire, Optimisations Samsung TV, Export KPI Google Sheets) est **`merge-photobooth`**.
+- La branche contenant toutes les évolutions (Photobooth, 300 questions, Gamification, Anti-AFK, Mix Aléatoire, Optimisations Samsung TV, Export KPI Google Sheets, Auth `LGE`/`AdminLGE`) est **`merge-photobooth`**.
 - Vérifier avant tout déploiement Render que la branche déployée pointe bien sur `merge-photobooth` (ou fusionner `merge-photobooth` dans `main`).

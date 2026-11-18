@@ -161,6 +161,15 @@
     let miniQrFor = "";
     let confettiTimer = null;
     let wakeLock = null;
+    let userToken = localStorage.getItem("qal_user_token") || "";
+    let adminToken = localStorage.getItem("qal_admin_token") || "";
+    let pageLockEnabled = true;
+    let pageUnlocked = false;
+    let adminAuthed = false;
+    let pendingChangeToken = "";
+    let pendingChangeSource = "regie";
+    let tvStarted = false;
+    let pbIntervalStarted = false;
 
     // --- Photobooth (cookies locaux par magasin) ---------------------------
     let pbStores = (() => {
@@ -361,18 +370,154 @@
           <div id="sheets-status" class="text-[11px] opacity-75"></div>
         </div>
         <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+          <div class="text-xs uppercase tracking-wider opacity-75 font-bold">🔐 Sécurité &amp; Utilisateurs</div>
+          <button id="btn-page-lock" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition bg-emerald-600/80 hover:bg-emerald-600">🔒 Blocage page (LGE) : ACTIVÉ</button>
+          <button id="btn-pwd-toggle" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left bg-white/10 hover:bg-white/20">🔑 Modifier mots de passe (LGE / AdminLGE)</button>
+          <div id="pwd-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
+            <select id="pwd-target-user" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-bold text-white outline-none">
+              <option value="LGE">Utilisateur : LGE (Page Quiz)</option>
+              <option value="AdminLGE">Utilisateur : AdminLGE (Régie)</option>
+            </select>
+            <input id="pwd-new-input" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+            <button id="pwd-save-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">💾 Changer le mot de passe</button>
+            <div id="pwd-feedback" class="text-[11px] min-h-[1rem]"></div>
+          </div>
+        </div>
+        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
           <div class="text-xs uppercase tracking-wider opacity-75 font-bold">👥 Joueurs en salle <span id="regie-player-count" class="text-amber-300"></span></div>
           <div id="regie-players" class="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+
+      <div id="page-lock-overlay" class="hidden fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-6">
+        <div class="w-full max-w-md bg-slate-900/95 border border-white/15 rounded-3xl p-7 shadow-2xl flex flex-col gap-4 text-center pop">
+          <div class="flex justify-center">
+            <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-14 w-auto object-contain" />
+          </div>
+          <h2 class="text-3xl font-black">🔒 Quiz Verrouillé</h2>
+          <p class="text-sm opacity-75">Connectez-vous avec le compte <b>LGE</b> pour débloquer la page et lancer le quiz.</p>
+          <div class="flex flex-col gap-2.5 text-left">
+            <input id="lock-user" value="LGE" placeholder="Identifiant (ex : LGE)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+            <input id="lock-pass" type="password" placeholder="Mot de passe" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+          </div>
+          <button id="lock-submit" class="w-full rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black py-3 text-lg shadow-xl active:scale-95 transition">
+            🔓 Débloquer &amp; Lancer le Quiz
+          </button>
+          <div id="lock-err" class="text-xs text-rose-300 min-h-[1rem]"></div>
+        </div>
+      </div>
+
+      <div id="admin-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div id="admin-login-box" class="w-full max-w-sm bg-slate-900 border border-white/15 rounded-3xl p-6 shadow-2xl flex flex-col gap-3">
+          <h3 class="text-xl font-black text-center">⚙️ Accès Régie (AdminLGE)</h3>
+          <input id="admin-user" value="AdminLGE" placeholder="Identifiant" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3.5 py-2.5 text-sm font-bold text-white outline-none focus:ring-2 ring-indigo-400" />
+          <input id="admin-pass" type="password" placeholder="Mot de passe" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3.5 py-2.5 text-sm font-bold text-white outline-none focus:ring-2 ring-indigo-400" />
+          <div class="flex gap-2 mt-1">
+            <button id="admin-cancel-btn" class="flex-1 bg-white/10 hover:bg-white/20 rounded-xl py-2.5 text-sm font-bold">Annuler</button>
+            <button id="admin-login-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-xl py-2.5 text-sm font-black">🔐 Connexion Régie</button>
+          </div>
+          <div id="admin-login-err" class="text-xs text-rose-300 text-center min-h-[1rem]"></div>
+        </div>
+        <div id="admin-change-box" class="hidden w-full max-w-sm bg-slate-900 border border-amber-300/40 rounded-3xl p-6 shadow-2xl flex flex-col gap-3">
+          <h3 class="text-xl font-black text-center text-amber-300">🔑 Première connexion AdminLGE</h3>
+          <p class="text-xs opacity-80 text-center">Vous devez définir un nouveau mot de passe personnel pour remplacer le mot de passe temporaire.</p>
+          <input id="admin-new-pass" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3.5 py-2.5 text-sm font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+          <input id="admin-confirm-pass" type="password" placeholder="Confirmer le mot de passe" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3.5 py-2.5 text-sm font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+          <button id="admin-change-btn" class="w-full bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl py-2.5 text-sm font-black">💾 Enregistrer &amp; Ouvrir la Régie</button>
+          <div id="admin-change-err" class="text-xs text-rose-300 text-center min-h-[1rem]"></div>
         </div>
       </div>`;
 
     $("regie").onclick = (e) => e.stopPropagation();
-    $("gear").onclick = (e) => { e.stopPropagation(); $("regie").classList.toggle("hidden"); };
+    $("admin-modal").onclick = (e) => e.stopPropagation();
+    $("page-lock-overlay").onclick = (e) => e.stopPropagation();
+    $("gear").onclick = (e) => {
+      e.stopPropagation();
+      const regie = $("regie");
+      if (!regie.classList.contains("hidden")) {
+        regie.classList.add("hidden");
+        return;
+      }
+      if (adminAuthed) {
+        regie.classList.remove("hidden");
+        return;
+      }
+      setText("admin-login-err", "");
+      $("admin-pass").value = "";
+      $("admin-login-box").classList.remove("hidden");
+      $("admin-change-box").classList.add("hidden");
+      $("admin-modal").classList.remove("hidden");
+      setTimeout(() => $("admin-pass").focus(), 50);
+    };
+    $("admin-cancel-btn").onclick = () => $("admin-modal").classList.add("hidden");
     $("regie-close").onclick = () => $("regie").classList.add("hidden");
     $("btn-next").onclick = () => send("NEXT");
     $("btn-speed").onclick = () => send("TOGGLE_SPEED");
     $("btn-vote").onclick = () => send("TOGGLE_VOTE");
     $("btn-mobile").onclick = () => { if (roomCode) window.open(joinUrl(), "_blank"); };
+    $("btn-pwd-toggle").onclick = () => {
+      $("pwd-manage-panel").classList.toggle("hidden");
+      setText("pwd-feedback", "");
+    };
+    function updatePageLockBtn() {
+      const btn = $("btn-page-lock");
+      if (!btn) return;
+      const key = String(pageLockEnabled);
+      if (btn.dataset.lockState === key) return;
+      btn.dataset.lockState = key;
+      btn.textContent = pageLockEnabled
+        ? "🔒 Blocage page (LGE) : ACTIVÉ"
+        : "🔓 Blocage page (LGE) : DÉSACTIVÉ";
+      btn.className = `w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition ${
+        pageLockEnabled ? "bg-emerald-600/80 hover:bg-emerald-600" : "bg-slate-700 hover:bg-slate-600 text-white/80"
+      }`;
+    }
+    $("btn-page-lock").onclick = async () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        send("TOGGLE_PAGE_LOCK");
+        return;
+      }
+      try {
+        const res = await fetch("/api/auth/page-lock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: adminToken, enabled: !pageLockEnabled }),
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          pageLockEnabled = !!data.page_lock_enabled;
+          updatePageLockBtn();
+          syncLockOverlay();
+        }
+      } catch (_) {}
+    };
+    async function saveManagedPassword() {
+      const target_user = $("pwd-target-user").value;
+      const new_password = $("pwd-new-input").value;
+      setText("pwd-feedback", "");
+      try {
+        const res = await fetch("/api/auth/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: adminToken, target_user, new_password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          setText("pwd-feedback", `❌ ${data.detail || "Erreur"}`);
+          return;
+        }
+        if (data.username === "AdminLGE" && data.token) {
+          adminToken = data.token;
+          localStorage.setItem("qal_admin_token", adminToken);
+        }
+        $("pwd-new-input").value = "";
+        setText("pwd-feedback", `✅ Mot de passe de ${data.username} mis à jour !`);
+      } catch (e) {
+        setText("pwd-feedback", `❌ ${e.message || "Erreur réseau"}`);
+      }
+    }
+    $("pwd-save-btn").onclick = saveManagedPassword;
+    $("pwd-new-input").onkeydown = (e) => { if (e.key === "Enter") saveManagedPassword(); };
     $("btn-sheets-save").onclick = () => {
       const url = ($("sheets-webhook-input").value || "").trim();
       send("SET_SHEETS_WEBHOOK", { webhook_url: url });
@@ -537,12 +682,11 @@
     }
 
     syncStoreSelect();
-    loadPhotobooth(false);
-    setInterval(() => loadPhotobooth(false), 180000);
+    updatePageLockBtn();
     updateWakeBadge();
     requestWakeLock();
 
-    // --- WebSocket ---------------------------------------------------------
+    // --- WebSocket & Authentification TV -----------------------------------
     function connect() {
       const qs = roomCode ? `?room=${encodeURIComponent(roomCode)}` : "";
       ws = new WebSocket(`${WS_BASE}/ws/tv${qs}`);
@@ -561,7 +705,170 @@
       ws.onclose = () => { setText("conn", "🔴 Reconnexion…"); setTimeout(connect, 2000); };
     }
     function send(type, extra = {}) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...extra })); }
-    connect();
+
+    function startTVSession() {
+      if (tvStarted) return;
+      tvStarted = true;
+      loadPhotobooth(false);
+      if (!pbIntervalStarted) {
+        pbIntervalStarted = true;
+        setInterval(() => loadPhotobooth(false), 180000);
+      }
+      connect();
+    }
+
+    function syncLockOverlay() {
+      const overlay = $("page-lock-overlay");
+      if (!pageLockEnabled || pageUnlocked) {
+        if (overlay) overlay.classList.add("hidden");
+        startTVSession();
+      } else {
+        if (overlay) overlay.classList.remove("hidden");
+      }
+    }
+
+    function openFirstLoginChangeModal(changeToken, source) {
+      pendingChangeToken = changeToken;
+      pendingChangeSource = source;
+      $("admin-new-pass").value = "";
+      $("admin-confirm-pass").value = "";
+      setText("admin-change-err", "");
+      $("admin-login-box").classList.add("hidden");
+      $("admin-change-box").classList.remove("hidden");
+      $("admin-modal").classList.remove("hidden");
+      setTimeout(() => $("admin-new-pass").focus(), 50);
+    }
+
+    async function submitPageUnlock() {
+      const username = ($("lock-user").value || "").trim();
+      const password = $("lock-pass").value || "";
+      setText("lock-err", "");
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, target: "page" }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          setText("lock-err", data.detail || "Identifiant ou mot de passe incorrect.");
+          return;
+        }
+        if (data.must_change_password) {
+          openFirstLoginChangeModal(data.change_token, "page");
+          return;
+        }
+        userToken = data.token || "";
+        localStorage.setItem("qal_user_token", userToken);
+        if (data.role === "admin") {
+          adminToken = data.token || "";
+          localStorage.setItem("qal_admin_token", adminToken);
+          adminAuthed = true;
+        }
+        pageUnlocked = true;
+        $("lock-pass").value = "";
+        syncLockOverlay();
+      } catch (e) {
+        setText("lock-err", e.message || "Erreur réseau");
+      }
+    }
+
+    async function submitAdminLogin() {
+      const username = ($("admin-user").value || "").trim();
+      const password = $("admin-pass").value || "";
+      setText("admin-login-err", "");
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password, target: "regie" }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          setText("admin-login-err", data.detail || "Identifiant ou mot de passe incorrect.");
+          return;
+        }
+        if (data.must_change_password) {
+          openFirstLoginChangeModal(data.change_token, "regie");
+          return;
+        }
+        adminToken = data.token || "";
+        userToken = adminToken;
+        localStorage.setItem("qal_admin_token", adminToken);
+        localStorage.setItem("qal_user_token", userToken);
+        adminAuthed = true;
+        pageUnlocked = true;
+        $("admin-pass").value = "";
+        $("admin-modal").classList.add("hidden");
+        syncLockOverlay();
+        $("regie").classList.remove("hidden");
+      } catch (e) {
+        setText("admin-login-err", e.message || "Erreur réseau");
+      }
+    }
+
+    async function submitAdminFirstChange() {
+      const new_password = $("admin-new-pass").value || "";
+      const confirm = $("admin-confirm-pass").value || "";
+      setText("admin-change-err", "");
+      if (new_password !== confirm) {
+        setText("admin-change-err", "Les deux mots de passe ne correspondent pas.");
+        return;
+      }
+      if (new_password.trim().length < 4) {
+        setText("admin-change-err", "Minimum 4 caractères requis.");
+        return;
+      }
+      try {
+        const res = await fetch("/api/auth/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: pendingChangeToken, new_password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          setText("admin-change-err", data.detail || "Erreur lors du changement.");
+          return;
+        }
+        pendingChangeToken = "";
+        adminToken = data.token || "";
+        userToken = adminToken;
+        localStorage.setItem("qal_admin_token", adminToken);
+        localStorage.setItem("qal_user_token", userToken);
+        adminAuthed = true;
+        pageUnlocked = true;
+        $("admin-modal").classList.add("hidden");
+        syncLockOverlay();
+        if (pendingChangeSource === "regie") {
+          $("regie").classList.remove("hidden");
+        }
+      } catch (e) {
+        setText("admin-change-err", e.message || "Erreur réseau");
+      }
+    }
+
+    $("lock-submit").onclick = submitPageUnlock;
+    $("lock-pass").onkeydown = (e) => { if (e.key === "Enter") submitPageUnlock(); };
+    $("admin-login-btn").onclick = submitAdminLogin;
+    $("admin-pass").onkeydown = (e) => { if (e.key === "Enter") submitAdminLogin(); };
+    $("admin-change-btn").onclick = submitAdminFirstChange;
+    $("admin-confirm-pass").onkeydown = (e) => { if (e.key === "Enter") submitAdminFirstChange(); };
+
+    async function checkInitialAuth() {
+      try {
+        const qs = `user_token=${encodeURIComponent(userToken)}&admin_token=${encodeURIComponent(adminToken)}`;
+        const res = await fetch(`/api/auth/status?${qs}`);
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          pageLockEnabled = !!data.page_lock_enabled;
+          pageUnlocked = !!data.user_unlocked;
+          adminAuthed = !!data.admin_authenticated;
+          updatePageLockBtn();
+        }
+      } catch (_) {}
+      syncLockOverlay();
+    }
+    checkInitialAuth();
 
     function eventCardClass(kind) {
       if (kind === "STREAK_15") return "bg-gradient-to-r from-amber-300 via-yellow-200 to-orange-400 text-slate-950 border-2 border-white anim-flame";
@@ -878,6 +1185,11 @@
             ? `🟢 ${pushSt.message || "Synchro OK"}`
             : "🟢 Drive actif (envoi auto fin de partie)";
       setText("sheets-status", sheetsMsg);
+      if (typeof s.page_lock_enabled === "boolean" && s.page_lock_enabled !== pageLockEnabled) {
+        pageLockEnabled = s.page_lock_enabled;
+        syncLockOverlay();
+      }
+      updatePageLockBtn();
 
       // 2. Badges de difficulté (uniquement si changement)
       const diffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;

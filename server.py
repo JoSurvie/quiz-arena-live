@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import csv
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 import io
 import json
 import os
 import random
 import re
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -81,6 +85,123 @@ LAST_PUSH_STATUS: dict[str, Any] = {
     "message": "Aucun envoi effectué",
     "at": "",
 }
+
+# --------------------------------------------------------------------------- #
+# Gestion des utilisateurs (LGE / AdminLGE) & Blocage de page
+# --------------------------------------------------------------------------- #
+AUTH_CONFIG_FILE = BASE_DIR / "auth_config.json"
+DEFAULT_LGE_PASSWORD = os.environ.get("LGE_DEFAULT_PASSWORD", "LGE2026")
+DEFAULT_ADMIN_PASSWORD = os.environ.get("ADMIN_DEFAULT_PASSWORD", "Admin2026!")
+_AUTH_SECRET = os.environ.get("LGE_AUTH_SECRET", "laser-quiz-lge-permanent-secret-2026")
+
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        100_000,
+    ).hex()
+
+
+def _build_default_auth_state() -> dict[str, Any]:
+    lge_salt = secrets.token_hex(16)
+    admin_salt = secrets.token_hex(16)
+    return {
+        "page_lock_enabled": True,
+        "users": {
+            "LGE": {
+                "username": "LGE",
+                "role": "user",
+                "salt": lge_salt,
+                "password_hash": _hash_password(DEFAULT_LGE_PASSWORD, lge_salt),
+                "must_change_password": False,
+            },
+            "AdminLGE": {
+                "username": "AdminLGE",
+                "role": "admin",
+                "salt": admin_salt,
+                "password_hash": _hash_password(DEFAULT_ADMIN_PASSWORD, admin_salt),
+                "must_change_password": True,
+            },
+        },
+    }
+
+
+def _save_auth_state(state: dict[str, Any]) -> None:
+    AUTH_CONFIG_FILE.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_auth_state() -> dict[str, Any]:
+    default = _build_default_auth_state()
+    if AUTH_CONFIG_FILE.exists():
+        try:
+            loaded = json.loads(AUTH_CONFIG_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                users = loaded.get("users")
+                if isinstance(users, dict) and "LGE" in users and "AdminLGE" in users:
+                    return {
+                        "page_lock_enabled": bool(loaded.get("page_lock_enabled", True)),
+                        "users": users,
+                    }
+        except Exception:
+            pass
+    return default
+
+
+AUTH_STATE: dict[str, Any] = _load_auth_state()
+
+
+def _make_auth_token(username: str, role: str, purpose: str = "session") -> str:
+    raw = json.dumps(
+        {"u": username, "r": role, "p": purpose},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    sig = hmac.new(
+        _AUTH_SECRET.encode("utf-8"),
+        b64.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{b64}.{sig}"
+
+
+def _verify_auth_token(
+    token: str | None, expected_purpose: str = "session"
+) -> dict[str, Any] | None:
+    if not token or "." not in token:
+        return None
+    try:
+        b64, sig = token.strip().split(".", 1)
+        expected_sig = hmac.new(
+            _AUTH_SECRET.encode("utf-8"),
+            b64.encode("ascii"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            return None
+        padded = b64 + "=" * (-len(b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("p") != expected_purpose:
+            return None
+        user = _find_user(str(payload.get("u") or ""))
+        if user is None:
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _find_user(username: str) -> dict[str, Any] | None:
+    low = username.strip().lower()
+    for uname, udata in (AUTH_STATE.get("users") or {}).items():
+        if uname.lower() == low:
+            return udata
+    return None
 
 
 def _now_quebec_str() -> str:
@@ -1049,6 +1170,7 @@ class Room:
             "sheets_webhook_set": bool(get_sheets_webhook_url()),
             "sheets_url": GOOGLE_SHEET_URL,
             "last_push_status": LAST_PUSH_STATUS,
+            "page_lock_enabled": bool(AUTH_STATE.get("page_lock_enabled", True)),
         }
 
     def player_state(self, p: Player) -> dict[str, Any]:
@@ -1415,6 +1537,113 @@ async def api_stats_csv() -> Response:
     )
 
 
+@app.get("/api/auth/status")
+async def api_auth_status(user_token: str = "", admin_token: str = "") -> dict[str, Any]:
+    user_payload = _verify_auth_token(user_token)
+    admin_payload = _verify_auth_token(admin_token)
+    admin_valid = bool(admin_payload and admin_payload.get("r") == "admin")
+    return {
+        "ok": True,
+        "page_lock_enabled": bool(AUTH_STATE.get("page_lock_enabled", True)),
+        "user_unlocked": bool(user_payload or admin_valid),
+        "admin_authenticated": admin_valid,
+        "admin_must_change_password": bool(
+            (AUTH_STATE.get("users") or {}).get("AdminLGE", {}).get("must_change_password", False)
+        ),
+    }
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
+    target = str(body.get("target") or "page").strip().lower()
+    user = _find_user(username)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect.")
+    if target == "regie" and user["username"] != "AdminLGE":
+        raise HTTPException(status_code=403, detail="Seul AdminLGE peut accéder à la régie.")
+    if not hmac.compare_digest(
+        str(user.get("password_hash") or ""),
+        _hash_password(password, str(user.get("salt") or "")),
+    ):
+        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect.")
+
+    if user.get("must_change_password"):
+        return {
+            "ok": True,
+            "must_change_password": True,
+            "username": user["username"],
+            "role": user["role"],
+            "change_token": _make_auth_token(
+                user["username"], user["role"], purpose="pwd_change"
+            ),
+        }
+
+    return {
+        "ok": True,
+        "must_change_password": False,
+        "username": user["username"],
+        "role": user["role"],
+        "token": _make_auth_token(user["username"], user["role"], purpose="session"),
+    }
+
+
+@app.post("/api/auth/change-password")
+async def api_auth_change_password(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    token = str(body.get("token") or "")
+    new_password = str(body.get("new_password") or "")
+    target_user = str(body.get("target_user") or "").strip()
+
+    payload = _verify_auth_token(token, expected_purpose="pwd_change")
+    is_admin_session = False
+    if payload is None:
+        payload = _verify_auth_token(token, expected_purpose="session")
+        if payload is None or payload.get("r") != "admin":
+            raise HTTPException(status_code=401, detail="Session expirée ou non autorisée.")
+        is_admin_session = True
+
+    if len(new_password.strip()) < 4:
+        raise HTTPException(
+            status_code=400,
+            detail="Le mot de passe doit contenir au moins 4 caractères.",
+        )
+
+    target_name = target_user if (is_admin_session and target_user) else str(payload["u"])
+    target = _find_user(target_name)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+
+    new_salt = secrets.token_hex(16)
+    target["salt"] = new_salt
+    target["password_hash"] = _hash_password(new_password, new_salt)
+    target["must_change_password"] = False
+    _save_auth_state(AUTH_STATE)
+
+    return {
+        "ok": True,
+        "username": target["username"],
+        "role": target["role"],
+        "token": _make_auth_token(target["username"], target["role"], purpose="session"),
+    }
+
+
+@app.post("/api/auth/page-lock")
+async def api_auth_page_lock(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    token = str(body.get("token") or "")
+    payload = _verify_auth_token(token, expected_purpose="session")
+    if payload is None or payload.get("r") != "admin":
+        raise HTTPException(status_code=403, detail="Accès réservé à AdminLGE.")
+    AUTH_STATE["page_lock_enabled"] = bool(body.get("enabled"))
+    _save_auth_state(AUTH_STATE)
+    for r in list(rooms.values()):
+        await r.broadcast()
+    return {
+        "ok": True,
+        "page_lock_enabled": bool(AUTH_STATE["page_lock_enabled"]),
+    }
+
+
 @app.websocket("/ws/tv")
 async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
     await websocket.accept()
@@ -1483,6 +1712,11 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                     target_id, "Tu as été retiré de la salle par la régie."
                 ):
                     await current.broadcast()
+            elif cmd == "TOGGLE_PAGE_LOCK":
+                AUTH_STATE["page_lock_enabled"] = not bool(AUTH_STATE.get("page_lock_enabled", True))
+                _save_auth_state(AUTH_STATE)
+                for r in list(rooms.values()):
+                    await r.broadcast()
             elif cmd == "SET_SHEETS_WEBHOOK":
                 global LAST_PUSH_STATUS
                 try:
