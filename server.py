@@ -38,6 +38,9 @@ CODE_LENGTH = 5
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sans caractères ambigus (O/0, I/1)
 ROOM_TTL = 30 * 60  # suppression d'une salle vide après 30 minutes
 MAX_NAME_LENGTH = 16
+DISCONNECT_GRACE_LOBBY = 5.0
+DISCONNECT_GRACE_GAME = 30.0
+AFK_MISSED_LIMIT = 5
 
 PHOTOBOOTH_CACHE_TTL = 90.0
 PHOTOBOOTH_CACHE: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
@@ -119,6 +122,8 @@ class Player:
         self.best_streak = 0
         self.fastest_time: float | None = None
         self.badges: list[dict[str, str]] = []
+        self.disconnected_at: float | None = None
+        self.missed_streak = 0
 
     @property
     def joined(self) -> bool:
@@ -137,6 +142,7 @@ class Player:
         self.best_streak = 0
         self.fastest_time = None
         self.badges = []
+        self.missed_streak = 0
         self.reset_round()
 
     def award_badge(self, kind: str, icon: str, label: str) -> None:
@@ -164,6 +170,8 @@ class Room:
         self.choice_players: list[list[dict[str, Any]]] = [[], [], [], []]
         self.fastest_record: dict[str, Any] | None = None
         self.round_events: list[dict[str, Any]] = []
+        self.pending_kicks: list[tuple[WebSocket, str]] = []
+        self.game_had_players = False
         self.task: asyncio.Task | None = None
         self.last_tick = time.monotonic()
         self.empty_since: float | None = None
@@ -295,10 +303,57 @@ class Room:
         self.round_events = []
         self.played_categories.add(self.category)
         self.last_game_players = {p.id for p in self.joined_players() if p.ws is not None}
+        self.game_had_players = bool(self.joined_players())
         for p in self.players.values():
             p.reset_stats()
             p.vote_category = None
         self.set_phase("QUESTION", QUESTION_DURATION)
+
+    def kick_player(self, pid: str, reason: str) -> bool:
+        p = self.players.get(pid)
+        if p is None:
+            return False
+        if p.ws is not None:
+            self.pending_kicks.append((p.ws, reason))
+            p.name = ""
+            p.vote_category = None
+            p.reset_stats()
+        else:
+            self.players.pop(pid, None)
+        self.refresh_category_locks()
+        self.apply_votes()
+        self.check_empty_active_game()
+        return True
+
+    def check_empty_active_game(self) -> None:
+        if self.phase not in ("QUESTION", "REVEAL", "INTER_PODIUM"):
+            return
+        if self.game_had_players and not self.joined_players():
+            self.back_to_lobby()
+        elif self.phase == "QUESTION" and self.all_answered():
+            self.reveal()
+
+    def prune_inactive_players(self) -> bool:
+        now = time.monotonic()
+        changed = False
+        grace = (
+            DISCONNECT_GRACE_LOBBY
+            if self.phase in ("LOBBY", "PODIUM")
+            else DISCONNECT_GRACE_GAME
+        )
+        for pid, p in list(self.players.items()):
+            if p.ws is None:
+                if not p.joined:
+                    self.players.pop(pid, None)
+                    changed = True
+                elif p.disconnected_at is not None and (now - p.disconnected_at) >= grace:
+                    self.players.pop(pid, None)
+                    changed = True
+        if changed:
+            self.refresh_category_locks()
+            self.apply_votes()
+            self.check_empty_active_game()
+        return changed
 
     def select_category(
         self,
@@ -373,10 +428,13 @@ class Room:
         for p in sorted(self.joined_players(), key=lambda x: x.name.lower()):
             if p.answer is not None and 0 <= p.answer < 4:
                 answered_count += 1
+                p.missed_streak = 0
                 self.counts[p.answer] += 1
                 self.choice_players[p.answer].append(
                     {"id": p.id, "name": p.name, "avatar": p.avatar}
                 )
+            else:
+                p.missed_streak += 1
             if q is not None and p.answer == q["answer"]:
                 ratio = p.answer_remaining / QUESTION_DURATION
                 pts = round(MIN_POINTS + (MAX_POINTS - MIN_POINTS) * ratio)
@@ -549,13 +607,28 @@ class Room:
         self.round_events.sort(key=lambda ev: priority.get(ev["kind"], 99))
         self.set_phase("REVEAL", REVEAL_DURATION)
 
+        afk_ids = [
+            pid
+            for pid, p in list(self.players.items())
+            if p.joined and p.missed_streak >= AFK_MISSED_LIMIT
+        ]
+        for pid in afk_ids:
+            self.kick_player(
+                pid,
+                f"Tu as été retiré de la partie après {AFK_MISSED_LIMIT} questions sans réponse.",
+            )
+
     def back_to_lobby(self) -> None:
         self.questions = []
         self.q_index = -1
         self.fastest_record = None
         self.round_events = []
-        for p in self.players.values():
-            p.reset_stats()
+        self.game_had_players = False
+        for pid, p in list(self.players.items()):
+            if p.ws is None:
+                self.players.pop(pid, None)
+            else:
+                p.reset_stats()
         self.set_phase("LOBBY", LOBBY_DURATION)
         self.refresh_category_locks()
         self.apply_votes()
@@ -613,6 +686,7 @@ class Room:
             "best_streak": p.best_streak,
             "fastest_time": p.fastest_time,
             "badges": p.badges,
+            "missed_streak": p.missed_streak,
         }
 
     def _question_payload(self, with_answer: bool) -> dict[str, Any] | None:
@@ -720,6 +794,10 @@ class Room:
 
     async def broadcast(self) -> None:
         tasks = []
+        kicks = self.pending_kicks
+        self.pending_kicks = []
+        for ws, reason in kicks:
+            tasks.append(safe_send(ws, {"type": "kicked", "reason": reason}))
         tv = self.tv_state()
         for ws in list(self.tvs):
             tasks.append(safe_send(ws, tv))
@@ -768,6 +846,7 @@ async def game_clock_loop(room: Room) -> None:
     try:
         while room.has_connections():
             await asyncio.sleep(1 / room.speed)
+            room.prune_inactive_players()
             room.timer -= 1
             room.last_tick = time.monotonic()
             if room.timer <= 0:
@@ -1017,6 +1096,12 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                 else:
                     current.back_to_lobby()
                 await current.broadcast()
+            elif cmd == "KICK_PLAYER":
+                target_id = str(msg.get("player_id") or "")
+                if current.kick_player(
+                    target_id, "Tu as été retiré de la salle par la régie."
+                ):
+                    await current.broadcast()
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -1048,6 +1133,7 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
             pass
 
     player.ws = websocket
+    player.disconnected_at = None
     room.ensure_loop()
     room.refresh_category_locks()
     room.apply_votes()
@@ -1072,6 +1158,8 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                     continue
                 player.name = name
                 player.avatar = avatar
+                player.disconnected_at = None
+                player.missed_streak = 0
                 if "beginner" in msg:
                     player.beginner = bool(msg.get("beginner"))
                 if "vote_category" in msg or "category" in msg:
@@ -1082,6 +1170,16 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                         player.vote_category = None
                 room.refresh_category_locks()
                 room.apply_votes()
+                await room.broadcast()
+
+            elif kind == "LEAVE":
+                player.name = ""
+                player.vote_category = None
+                player.disconnected_at = None
+                player.reset_stats()
+                room.refresh_category_locks()
+                room.apply_votes()
+                room.check_empty_active_game()
                 await room.broadcast()
 
             elif kind == "VOTE":
@@ -1112,6 +1210,7 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                 ):
                     player.answer = choice  # réponse verrouillée
                     player.answer_remaining = room.remaining_precise()
+                    player.missed_streak = 0
                     if room.all_answered():
                         room.reveal()
                     await room.broadcast()
@@ -1124,6 +1223,9 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
             player.ws = None
             if not player.joined:
                 room.players.pop(pid, None)
+            else:
+                player.disconnected_at = time.monotonic()
             room.refresh_category_locks()
             room.apply_votes()
+            room.check_empty_active_game()
             await room.broadcast()
