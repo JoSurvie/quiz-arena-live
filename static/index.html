@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <meta name="theme-color" content="#1e1b4b" />
-  <title>Quiz Arena Live</title>
+  <title>Laser Quiz</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
@@ -53,6 +53,7 @@
   "use strict";
 
   const SHAPES = ["▲", "◆", "●", "■"];
+  const LOGO_URL = "https://lasergame-evolution.ca/wp-content/uploads/2025/01/CANADA-vector-logo-color-bl-black-copie-01.png";
   const COLORS = ["bg-rose-500", "bg-sky-500", "bg-amber-400", "bg-emerald-500"];
   const AVATARS = ["😎", "🦊", "🐼", "🐸", "🦁", "🐙", "🦄", "🐯", "🐵", "🐧", "🤖", "👽", "🐲", "🍕", "🚀", "⚡"];
   const CAT_ICONS = {
@@ -117,7 +118,8 @@
       <div class="h-full flex flex-col">
         <header class="flex items-center justify-between px-6 py-3 pr-20">
           <div class="flex items-center gap-3">
-            <div class="text-3xl font-black tracking-tight">Quiz <span class="text-amber-300">Arena</span> Live</div>
+            <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-11 w-auto object-contain bg-white/95 rounded-xl px-2.5 py-1 shadow-md" />
+            <div class="text-3xl font-black tracking-tight">Laser <span class="text-amber-300">Quiz</span></div>
             <span id="live" class="text-xs font-bold bg-rose-600 px-2 py-0.5 rounded-full pulse-soft">● LIVE</span>
             <span id="speed-badge" class="hidden text-xs font-bold bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full">⚡ 5x</span>
             <span id="vote-badge" class="hidden text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
@@ -215,6 +217,7 @@
         main.innerHTML = `
           <div class="h-full grid lg:grid-cols-2 gap-10 px-10 py-4 items-center">
             <div class="flex flex-col items-center text-center pop">
+              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-14 w-auto object-contain bg-white/95 rounded-2xl px-4 py-1.5 shadow-xl mb-3" />
               <h2 class="text-4xl font-extrabold">Scannez pour jouer !</h2>
               <div class="mt-2 flex flex-wrap justify-center gap-2">
                 <div class="inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-full px-5 py-1.5 text-lg font-bold text-amber-200">
@@ -544,7 +547,10 @@
     app.innerHTML = `
       <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
         <header class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <div class="font-black text-lg">Quiz <span class="text-amber-300">Arena</span></div>
+          <div class="flex items-center gap-2">
+            <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-8 w-auto object-contain bg-white/95 rounded-lg px-1.5 py-0.5 shadow" />
+            <div class="font-black text-lg">Laser <span class="text-amber-300">Quiz</span></div>
+          </div>
           <div id="me" class="flex items-center gap-2 text-sm"></div>
           <div class="text-xs bg-white/10 rounded-full px-2 py-1 font-mono">${esc(code || "?????")}</div>
         </header>
@@ -692,6 +698,9 @@
       if (!s.joined || editing) {
         main.innerHTML = `
           <div class="flex-1 flex flex-col gap-4 justify-center pop py-2">
+            <div class="flex justify-center">
+              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain bg-white/95 rounded-xl px-3 py-1 shadow-lg" />
+            </div>
             <h1 class="text-3xl font-black text-center">Rejoins la partie !</h1>
             <div>
               <div class="text-sm uppercase opacity-70 mb-2">Choisis ton avatar</div>

@@ -1,4 +1,4 @@
-"""Quiz Arena Live - serveur FastAPI + WebSockets (multi-salles)."""
+"""Laser Quiz - serveur FastAPI + WebSockets (multi-salles)."""
 
 from __future__ import annotations
 
@@ -524,7 +524,7 @@ async def game_clock_loop(room: Room) -> None:
 # --------------------------------------------------------------------------- #
 # Application
 # --------------------------------------------------------------------------- #
-app = FastAPI(title="Quiz Arena Live")
+app = FastAPI(title="Laser Quiz")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
