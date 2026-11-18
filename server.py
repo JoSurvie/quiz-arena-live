@@ -53,9 +53,11 @@ def load_questions() -> list[dict[str, Any]]:
             and isinstance(answer, int)
             and 0 <= answer < 4
         ):
+            diff = str(item.get("difficulty", "standard")).strip().lower()
             valid.append(
                 {
                     "category": str(item.get("category", "Général")),
+                    "difficulty": "debutant" if diff == "debutant" else "standard",
                     "q": item["q"],
                     "options": [str(o) for o in options],
                     "answer": answer,
@@ -70,6 +72,13 @@ QUESTIONS = load_questions()
 CATEGORIES: list[str] = list(dict.fromkeys(q["category"] for q in QUESTIONS))
 QUESTIONS_BY_CATEGORY: dict[str, list[dict[str, Any]]] = {
     cat: [q for q in QUESTIONS if q["category"] == cat] for cat in CATEGORIES
+}
+QUESTIONS_BY_CAT_DIFF: dict[tuple[str, str], list[dict[str, Any]]] = {
+    (cat, diff): [
+        q for q in QUESTIONS if q["category"] == cat and q["difficulty"] == diff
+    ]
+    for cat in CATEGORIES
+    for diff in ("standard", "debutant")
 }
 
 
@@ -87,6 +96,8 @@ class Player:
         self.answer_remaining = 0.0
         self.last_points = 0
         self.last_correct: bool | None = None
+        self.vote_category: str | None = None
+        self.beginner = False
 
     @property
     def joined(self) -> bool:
@@ -107,9 +118,14 @@ class Room:
         self.players: dict[str, Player] = {}
         self.tvs: set[WebSocket] = set()
         self.cat_index = 0
+        self.voting_enabled = False
+        self.played_categories: set[str] = set()
+        self.last_game_players: set[str] = set()
+        self.active_difficulty = "standard"
         self.questions: list[dict[str, Any]] = []
         self.q_index = -1
         self.counts = [0, 0, 0, 0]
+        self.choice_players: list[list[dict[str, Any]]] = [[], [], [], []]
         self.task: asyncio.Task | None = None
         self.last_tick = time.monotonic()
         self.empty_since: float | None = None
@@ -120,6 +136,16 @@ class Room:
 
     @property
     def next_category(self) -> str:
+        avail = self.available_categories()
+        if self.voting_enabled:
+            counts = self.vote_counts()
+            top = self._leading_voted_category(avail, counts)
+            if top is not None:
+                return top
+        for offset in range(1, len(CATEGORIES) + 1):
+            candidate = CATEGORIES[(self.cat_index + offset) % len(CATEGORIES)]
+            if candidate in avail:
+                return candidate
         return CATEGORIES[(self.cat_index + 1) % len(CATEGORIES)]
 
     # ----- connexions ----------------------------------------------------- #
@@ -151,6 +177,64 @@ class Room:
         active = [p for p in self.joined_players() if p.ws is not None]
         return bool(active) and all(p.answer is not None for p in active)
 
+    def available_categories(self) -> list[str]:
+        avail = [c for c in CATEGORIES if c not in self.played_categories]
+        return avail if avail else list(CATEGORIES)
+
+    def vote_counts(self) -> dict[str, int]:
+        avail = set(self.available_categories())
+        counts = {c: 0 for c in CATEGORIES}
+        for p in self.joined_players():
+            if p.ws is not None and p.vote_category in avail:
+                counts[p.vote_category] += 1
+        return counts
+
+    def _leading_voted_category(
+        self, avail: list[str], counts: dict[str, int]
+    ) -> str | None:
+        best_cat: str | None = None
+        best_count = 0
+        for c in avail:
+            cnt = counts.get(c, 0)
+            if cnt > best_count:
+                best_count = cnt
+                best_cat = c
+        return best_cat
+
+    def beginner_stats(self) -> tuple[int, int, bool]:
+        active = [p for p in self.joined_players() if p.ws is not None]
+        total = len(active)
+        beginners = sum(1 for p in active if p.beginner)
+        is_beginner = total > 0 and (beginners / total) > 0.5
+        return beginners, total, is_beginner
+
+    def refresh_category_locks(self) -> None:
+        if self.phase not in ("LOBBY", "PODIUM"):
+            return
+        if self.last_game_players:
+            active_ids = {p.id for p in self.joined_players() if p.ws is not None}
+            not_replaying = len(self.last_game_players - active_ids)
+            if not_replaying >= len(self.last_game_players) / 2:
+                self.played_categories.clear()
+                self.last_game_players.clear()
+        if len(self.played_categories) >= len(CATEGORIES):
+            self.played_categories.clear()
+
+    def apply_votes(self) -> None:
+        if self.phase != "LOBBY":
+            return
+        avail = self.available_categories()
+        if self.voting_enabled:
+            counts = self.vote_counts()
+            best = self._leading_voted_category(avail, counts)
+            if best is not None:
+                cur_votes = counts.get(self.category, 0) if self.category in avail else -1
+                if cur_votes < counts[best] or self.category not in avail:
+                    self.cat_index = CATEGORIES.index(best)
+                return
+        if self.category not in avail:
+            self.cat_index = CATEGORIES.index(avail[0])
+
     # ----- transitions ----------------------------------------------------- #
     def set_phase(self, phase: str, duration: int) -> None:
         self.phase = phase
@@ -159,17 +243,32 @@ class Room:
         self.last_tick = time.monotonic()
 
     def start_game(self) -> None:
-        pool = QUESTIONS_BY_CATEGORY.get(self.category, QUESTIONS)
+        self.refresh_category_locks()
+        self.apply_votes()
+        _, _, is_beginner = self.beginner_stats()
+        self.active_difficulty = "debutant" if is_beginner else "standard"
+        pool = (
+            QUESTIONS_BY_CAT_DIFF.get((self.category, self.active_difficulty))
+            or QUESTIONS_BY_CATEGORY.get(self.category, QUESTIONS)
+        )
         self.questions = random.sample(pool, min(QUESTIONS_PER_GAME, len(pool)))
         self.q_index = 0
+        self.played_categories.add(self.category)
+        self.last_game_players = {p.id for p in self.joined_players() if p.ws is not None}
         for p in self.players.values():
             p.score = 0
             p.last_points = 0
             p.last_correct = None
+            p.vote_category = None
             p.reset_round()
         self.set_phase("QUESTION", QUESTION_DURATION)
 
-    def select_category(self, category: str | None = None, index: Any = None) -> bool:
+    def select_category(
+        self,
+        category: str | None = None,
+        index: Any = None,
+        enforce_available: bool = False,
+    ) -> bool:
         target_idx = None
         if isinstance(category, str) and category in QUESTIONS_BY_CATEGORY:
             target_idx = CATEGORIES.index(category)
@@ -182,15 +281,21 @@ class Room:
                 pass
         if target_idx is None:
             return False
+        if enforce_available and CATEGORIES[target_idx] not in self.available_categories():
+            return False
         self.cat_index = target_idx
         return True
 
     def reveal(self) -> None:
         q = self.current_question()
         self.counts = [0, 0, 0, 0]
-        for p in self.joined_players():
-            if p.answer is not None:
+        self.choice_players = [[], [], [], []]
+        for p in sorted(self.joined_players(), key=lambda x: x.name.lower()):
+            if p.answer is not None and 0 <= p.answer < 4:
                 self.counts[p.answer] += 1
+                self.choice_players[p.answer].append(
+                    {"id": p.id, "name": p.name, "avatar": p.avatar}
+                )
             if q is not None and p.answer == q["answer"]:
                 ratio = p.answer_remaining / QUESTION_DURATION
                 pts = round(MIN_POINTS + (MAX_POINTS - MIN_POINTS) * ratio)
@@ -212,6 +317,8 @@ class Room:
             p.last_points = 0
             p.last_correct = None
         self.set_phase("LOBBY", LOBBY_DURATION)
+        self.refresh_category_locks()
+        self.apply_votes()
 
     def advance(self) -> None:
         """Passe à l'étape suivante (fin de timer ou commande régie NEXT)."""
@@ -237,7 +344,8 @@ class Room:
                 p.reset_round()
             self.set_phase("QUESTION", QUESTION_DURATION)
         else:  # PODIUM -> catégorie suivante & nouveau cycle
-            self.cat_index = (self.cat_index + 1) % len(CATEGORIES)
+            self.refresh_category_locks()
+            self.cat_index = CATEGORIES.index(self.next_category)
             self.back_to_lobby()
 
     def on_timer_expired(self) -> None:
@@ -258,6 +366,8 @@ class Room:
             "answered": p.answer is not None,
             "last_points": p.last_points,
             "last_correct": p.last_correct,
+            "beginner": p.beginner,
+            "vote_category": p.vote_category,
         }
 
     def _question_payload(self, with_answer: bool) -> dict[str, Any] | None:
@@ -272,6 +382,12 @@ class Room:
     def tv_state(self) -> dict[str, Any]:
         joined = self.joined_players()
         reveal = self.phase == "REVEAL"
+        b_count, b_total, is_beginner = self.beginner_stats()
+        diff = (
+            ("debutant" if is_beginner else "standard")
+            if self.phase in ("LOBBY", "PODIUM")
+            else self.active_difficulty
+        )
         return {
             "type": "state",
             "room": self.code,
@@ -279,7 +395,15 @@ class Room:
             "timer": max(0, int(self.timer)),
             "duration": self.duration,
             "speed": self.speed,
+            "voting_enabled": self.voting_enabled,
             "categories": CATEGORIES,
+            "available_categories": self.available_categories(),
+            "played_categories": [c for c in CATEGORIES if c in self.played_categories],
+            "votes": self.vote_counts(),
+            "beginner_count": b_count,
+            "beginner_total": b_total,
+            "beginner_mode": is_beginner,
+            "difficulty": diff,
             "category": self.category,
             "cat_index": self.cat_index,
             "next_category": self.next_category,
@@ -287,6 +411,7 @@ class Room:
             "q_total": len(self.questions),
             "question": self._question_payload(with_answer=reveal),
             "counts": self.counts if reveal else None,
+            "choice_players": self.choice_players if reveal else None,
             "answered_count": sum(1 for p in joined if p.answer is not None),
             "players": [self._public_player(p) for p in joined],
             "leaderboard": [self._public_player(p) for p in self.leaderboard()],
@@ -296,13 +421,27 @@ class Room:
         board = self.leaderboard()
         rank = next((i + 1 for i, x in enumerate(board) if x.id == p.id), None)
         reveal = self.phase == "REVEAL"
+        b_count, b_total, is_beginner = self.beginner_stats()
+        diff = (
+            ("debutant" if is_beginner else "standard")
+            if self.phase in ("LOBBY", "PODIUM")
+            else self.active_difficulty
+        )
         return {
             "type": "state",
             "room": self.code,
             "phase": self.phase,
             "timer": max(0, int(self.timer)),
             "duration": self.duration,
+            "voting_enabled": self.voting_enabled,
             "categories": CATEGORIES,
+            "available_categories": self.available_categories(),
+            "played_categories": [c for c in CATEGORIES if c in self.played_categories],
+            "votes": self.vote_counts(),
+            "beginner_count": b_count,
+            "beginner_total": b_total,
+            "beginner_mode": is_beginner,
+            "difficulty": diff,
             "category": self.category,
             "cat_index": self.cat_index,
             "next_category": self.next_category,
@@ -316,6 +455,8 @@ class Room:
             "rank": rank,
             "players_count": len(board),
             "my_answer": p.answer,
+            "my_vote": p.vote_category,
+            "my_beginner": p.beginner,
             "last_points": p.last_points,
             "last_correct": p.last_correct,
             "top3": [self._public_player(x) for x in board[:3]],
@@ -431,15 +572,23 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
             elif cmd == "TOGGLE_SPEED":
                 current.speed = 5 if current.speed == 1 else 1
                 await current.broadcast()
+            elif cmd == "TOGGLE_VOTE":
+                current.voting_enabled = not current.voting_enabled
+                current.refresh_category_locks()
+                current.apply_votes()
+                await current.broadcast()
             elif cmd == "SELECT_CATEGORY":
                 if current.phase in ("LOBBY", "PODIUM") and current.select_category(
-                    msg.get("category"), msg.get("index")
+                    msg.get("category"),
+                    msg.get("index"),
+                    enforce_available=current.voting_enabled,
                 ):
                     if current.phase == "PODIUM" and msg.get("start"):
                         current.start_game()
                     await current.broadcast()
             elif cmd == "START_NEXT_CATEGORY":
-                current.cat_index = (current.cat_index + 1) % len(CATEGORIES)
+                current.refresh_category_locks()
+                current.cat_index = CATEGORIES.index(current.next_category)
                 if current.joined_players():
                     current.start_game()
                 else:
@@ -477,6 +626,8 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
 
     player.ws = websocket
     room.ensure_loop()
+    room.refresh_category_locks()
+    room.apply_votes()
     await room.broadcast()
 
     try:
@@ -498,6 +649,31 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                     continue
                 player.name = name
                 player.avatar = avatar
+                if "beginner" in msg:
+                    player.beginner = bool(msg.get("beginner"))
+                if "vote_category" in msg or "category" in msg:
+                    vote_cat = msg.get("vote_category", msg.get("category"))
+                    if vote_cat in room.available_categories():
+                        player.vote_category = vote_cat
+                    elif vote_cat is None or vote_cat == "":
+                        player.vote_category = None
+                room.refresh_category_locks()
+                room.apply_votes()
+                await room.broadcast()
+
+            elif kind == "VOTE":
+                if not player.joined:
+                    continue
+                if "beginner" in msg:
+                    player.beginner = bool(msg.get("beginner"))
+                if "category" in msg and room.phase in ("LOBBY", "PODIUM"):
+                    vote_cat = msg.get("category")
+                    if vote_cat in room.available_categories():
+                        player.vote_category = vote_cat
+                    elif vote_cat is None or vote_cat == "":
+                        player.vote_category = None
+                room.refresh_category_locks()
+                room.apply_votes()
                 await room.broadcast()
 
             elif kind == "ANSWER":
@@ -525,4 +701,6 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
             player.ws = None
             if not player.joined:
                 room.players.pop(pid, None)
+            room.refresh_category_locks()
+            room.apply_votes()
             await room.broadcast()

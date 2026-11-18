@@ -120,6 +120,8 @@
             <div class="text-3xl font-black tracking-tight">Quiz <span class="text-amber-300">Arena</span> Live</div>
             <span id="live" class="text-xs font-bold bg-rose-600 px-2 py-0.5 rounded-full pulse-soft">● LIVE</span>
             <span id="speed-badge" class="hidden text-xs font-bold bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full">⚡ 5x</span>
+            <span id="vote-badge" class="hidden text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
+            <span id="diff-badge" class="text-xs font-bold bg-white/15 px-2.5 py-0.5 rounded-full"></span>
           </div>
           <div id="mini-qr-wrap" class="hidden items-center gap-3 bg-white/10 rounded-2xl p-2 pr-4">
             <div class="bg-white p-1.5 rounded-xl w-24"><div id="mini-qr"></div></div>
@@ -136,16 +138,18 @@
       </div>
 
       <button id="gear" title="Régie" class="fixed top-3 right-4 text-2xl opacity-30 hover:opacity-100 transition">⚙️</button>
-      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 w-60">
+      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 w-64">
         <div class="text-xs uppercase opacity-60 px-1">Régie</div>
         <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2 font-bold text-left">⏭️ Étape suivante</button>
         <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-4 py-2 font-bold text-left">⚡ Vitesse : 1x</button>
+        <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-4 py-2 font-bold text-left">🗳️ Vote catégories : OFF</button>
         <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-4 py-2 font-bold text-left">📱 Ouvrir vue Mobile</button>
       </div>`;
 
     $("gear").onclick = (e) => { e.stopPropagation(); $("regie").classList.toggle("hidden"); };
     $("btn-next").onclick = () => send("NEXT");
     $("btn-speed").onclick = () => send("TOGGLE_SPEED");
+    $("btn-vote").onclick = () => send("TOGGLE_VOTE");
     $("btn-mobile").onclick = () => { if (roomCode) window.open(joinUrl(), "_blank"); };
     updateWakeBadge();
     requestWakeLock();
@@ -212,22 +216,29 @@
           <div class="h-full grid lg:grid-cols-2 gap-10 px-10 py-4 items-center">
             <div class="flex flex-col items-center text-center pop">
               <h2 class="text-4xl font-extrabold">Scannez pour jouer !</h2>
-              <div class="mt-2 inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-full px-5 py-1.5 text-lg font-bold text-amber-200">
-                <span>Thème :</span>
-                <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
+              <div class="mt-2 flex flex-wrap justify-center gap-2">
+                <div class="inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-full px-5 py-1.5 text-lg font-bold text-amber-200">
+                  <span>Thème :</span>
+                  <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
+                </div>
+                <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-4 py-1.5 text-sm font-bold"></div>
               </div>
-              <div class="bg-white p-5 rounded-3xl shadow-2xl mt-4 w-[min(350px,54vh)]"><div id="big-qr"></div></div>
+              <div class="bg-white p-5 rounded-3xl shadow-2xl mt-4 w-[min(340px,50vh)]"><div id="big-qr"></div></div>
               <div class="mt-4 text-lg opacity-80">ou rendez-vous sur <span class="font-mono text-amber-200">${esc(window.location.origin)}</span></div>
               <div class="mt-1 text-xl">Code de la salle</div>
               <div class="text-7xl font-black tracking-[0.3em] text-amber-300 drop-shadow">${esc(s.room)}</div>
             </div>
             <div class="flex flex-col h-full min-h-0 py-2 gap-4">
               <div>
-                <div class="text-xs uppercase tracking-wider opacity-70 mb-2">Catégorie du quiz (15 questions)</div>
-                <div class="flex flex-wrap gap-2">
+                <div class="flex items-center justify-between text-xs uppercase tracking-wider opacity-75 mb-2">
+                  <span>Catégorie du quiz (15 questions)</span>
+                  <span id="lobby-vote-hint" class="text-indigo-200 font-bold"></span>
+                </div>
+                <div id="lobby-cats" class="flex flex-wrap gap-2">
                   ${cats.map(cat => `
-                    <button data-cat="${esc(cat)}" class="cat-btn rounded-xl px-3.5 py-2 text-sm font-bold transition bg-white/10 hover:bg-white/20">
-                      ${catIcon(cat)} ${esc(cat)}
+                    <button data-cat="${esc(cat)}" class="cat-btn rounded-xl px-3.5 py-2 text-sm font-bold transition bg-white/10 hover:bg-white/20 flex items-center gap-2">
+                      <span>${catIcon(cat)} ${esc(cat)}</span>
+                      <span class="cat-meta text-xs"></span>
                     </button>`).join("")}
                 </div>
               </div>
@@ -251,7 +262,12 @@
         main.innerHTML = `
           <div class="h-full flex flex-col px-8 pb-6 gap-5">
             <div class="flex items-center justify-between text-xl">
-              <span class="bg-white/15 rounded-full px-4 py-1 font-bold">${catIcon(s.question.category)} ${esc(s.question.category)}</span>
+              <div class="flex items-center gap-2">
+                <span class="bg-white/15 rounded-full px-4 py-1 font-bold">${catIcon(s.question.category)} ${esc(s.question.category)}</span>
+                <span class="text-sm font-bold rounded-full px-3 py-1 ${s.difficulty === "debutant" ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/10 text-white/80"}">
+                  ${s.difficulty === "debutant" ? "🌱 Débutant" : "🔥 Standard"}
+                </span>
+              </div>
               <span class="opacity-80">Question <b>${s.q_index + 1}</b> / ${s.q_total}</span>
               <span id="answered" class="opacity-80"></span>
             </div>
@@ -269,7 +285,8 @@
             </div>
           </div>`;
       } else if (s.phase === "REVEAL" && s.question) {
-        const total = Math.max(1, s.counts.reduce((a, b) => a + b, 0));
+        const choicePlayers = s.choice_players || [[], [], [], []];
+        const total = Math.max(1, choicePlayers.reduce((a, b) => a + b.length, 0));
         main.innerHTML = `
           <div class="h-full flex flex-col px-8 pb-6 gap-5">
             <div class="flex items-center justify-between text-xl">
@@ -282,13 +299,25 @@
               <div class="lg:col-span-2 grid grid-cols-2 gap-4 content-center">
                 ${s.question.options.map((o, i) => {
                   const ok = i === s.question.answer;
+                  const voters = choicePlayers[i] || [];
                   return `
-                  <div class="${COLORS[i]} ${ok ? "ring-8 ring-white scale-105" : "opacity-30"} transition rounded-2xl px-6 py-6 flex items-center gap-5 shadow-xl relative">
-                    <span class="text-5xl">${SHAPES[i]}</span>
-                    <span class="text-2xl md:text-3xl font-bold flex-1">${esc(o)}</span>
-                    <span class="text-3xl font-black">${ok ? "✔" : ""}</span>
-                    <span class="absolute -top-3 -right-3 bg-slate-900 rounded-full px-3 py-1 text-lg font-bold">${s.counts[i]} 👤</span>
-                    <div class="absolute bottom-0 left-0 h-2 bg-white/70 rounded-bl-2xl" style="width:${(s.counts[i] / total) * 100}%"></div>
+                  <div class="${COLORS[i]} ${ok ? "ring-8 ring-white scale-[1.02]" : "opacity-40"} transition rounded-2xl px-5 py-4 flex flex-col gap-3 shadow-xl relative">
+                    <div class="flex items-center gap-4">
+                      <span class="text-5xl">${SHAPES[i]}</span>
+                      <span class="text-2xl md:text-3xl font-bold flex-1 leading-tight">${esc(o)}</span>
+                      <span class="text-3xl font-black">${ok ? "✔" : ""}</span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 min-h-[1.75rem]">
+                      ${voters.length ? voters.map(v => `
+                        <span class="inline-flex items-center gap-1 bg-slate-950/65 border border-white/20 rounded-full px-2.5 py-0.5 text-sm font-bold shadow">
+                          <span>${esc(v.avatar)}</span>
+                          <span>${esc(v.name)}</span>
+                        </span>`).join("")
+                      : `<span class="text-xs uppercase tracking-wider opacity-65 italic">Aucun participant</span>`}
+                    </div>
+                    <div class="h-2 bg-black/20 rounded-full overflow-hidden">
+                      <div class="h-full bg-white/80" style="width:${(voters.length / total) * 100}%"></div>
+                    </div>
                   </div>`;
                 }).join("")}
               </div>
@@ -355,13 +384,12 @@
                   🚀 Enchaîner sur : ${catIcon(s.next_category)} ${esc(s.next_category)}
                 </button>
               </div>
-              <div class="flex flex-wrap justify-center gap-2">
-                ${cats.map(cat => {
-                  const isNext = cat === s.next_category;
-                  return `<button data-cat="${esc(cat)}" class="podium-cat-btn text-xs font-bold px-3 py-1.5 rounded-xl transition ${isNext ? "bg-amber-400/25 border border-amber-300 text-amber-200" : "bg-white/10 hover:bg-white/20 text-white/80"}">
-                    ${catIcon(cat)} ${esc(cat)}${isNext ? " (suivante)" : ""}
-                  </button>`;
-                }).join("")}
+              <div id="podium-cats" class="flex flex-wrap justify-center gap-2">
+                ${cats.map(cat => `
+                  <button data-cat="${esc(cat)}" class="podium-cat-btn text-xs font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 bg-white/10 hover:bg-white/20">
+                    <span>${catIcon(cat)} ${esc(cat)}</span>
+                    <span class="podium-cat-meta"></span>
+                  </button>`).join("")}
               </div>
             </div>
           </div>`;
@@ -377,23 +405,80 @@
 
     function updateDynamic() {
       const s = state;
+      const played = new Set(s.played_categories || []);
+      const votes = s.votes || {};
+      const voting = !!s.voting_enabled;
+      const isBeg = !!s.beginner_mode;
+      const bCount = s.beginner_count || 0;
+      const bTotal = s.beginner_total || 0;
+
       setText("timer", fmt(s.timer));
       const bar = $("bar");
       if (bar) bar.style.width = `${(s.timer / Math.max(1, s.duration)) * 100}%`;
       setText("answered", `${s.answered_count} / ${s.players.filter(p => p.connected).length} réponse(s)`);
       setText("btn-speed", `⚡ Vitesse : ${s.speed}x`);
       $("speed-badge").classList.toggle("hidden", s.speed === 1);
+      setText("btn-vote", `🗳️ Vote catégories : ${voting ? "ON" : "OFF"}`);
+      $("vote-badge").classList.toggle("hidden", !voting);
 
-      // Catégorie active dans le lobby
+      const diffBadge = $("diff-badge");
+      if (diffBadge) {
+        const useBeg = s.phase === "LOBBY" || s.phase === "PODIUM" ? isBeg : s.difficulty === "debutant";
+        diffBadge.textContent = useBeg
+          ? `🌱 Débutant (${bCount}/${bTotal})`
+          : `🔥 Standard (${bCount}/${bTotal})`;
+        diffBadge.className = `text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
+      }
+
+      // Catégorie active & votes dans le lobby
       setText("lobby-cat-name", `${catIcon(s.category)} ${s.category || ""}`);
+      setText("lobby-vote-hint", voting ? "🗳️ Vote joueurs actif" : "Sélection régie");
+      const lobbyDiff = $("lobby-diff-badge");
+      if (lobbyDiff) {
+        lobbyDiff.textContent = isBeg
+          ? `🌱 Niveau Débutant (${bCount}/${bTotal} débutants)`
+          : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`;
+        lobbyDiff.className = `inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-bold ${isBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/10 text-white/85"}`;
+      }
       document.querySelectorAll(".cat-btn").forEach(btn => {
-        const active = btn.dataset.cat === s.category;
+        const cat = btn.dataset.cat;
+        const active = cat === s.category;
+        const locked = played.has(cat);
+        const vCount = votes[cat] || 0;
+        btn.disabled = voting && locked;
         btn.classList.toggle("bg-amber-400", active);
         btn.classList.toggle("text-slate-900", active);
         btn.classList.toggle("ring-4", active);
         btn.classList.toggle("ring-amber-200", active);
         btn.classList.toggle("bg-white/10", !active);
-        btn.classList.toggle("hover:bg-white/20", !active);
+        btn.classList.toggle("hover:bg-white/20", !active && !(voting && locked));
+        btn.classList.toggle("opacity-40", locked && !active);
+        const meta = btn.querySelector(".cat-meta");
+        if (meta) {
+          meta.textContent = locked ? "🔒 Déjà jouée" : (voting ? `🗳️ ${vCount}` : "");
+        }
+      });
+
+      // Mise à jour dynamique du podium (catégorie suivante & votes en direct)
+      const nextBtn = $("btn-next-cat");
+      if (nextBtn) {
+        nextBtn.textContent = `🚀 Enchaîner sur : ${catIcon(s.next_category)} ${s.next_category}`;
+      }
+      document.querySelectorAll(".podium-cat-btn").forEach(btn => {
+        const cat = btn.dataset.cat;
+        const isNext = cat === s.next_category;
+        const locked = played.has(cat);
+        const vCount = votes[cat] || 0;
+        btn.disabled = voting && locked;
+        btn.className = `podium-cat-btn text-xs font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
+          isNext ? "bg-amber-400/25 border border-amber-300 text-amber-200"
+          : locked ? "bg-white/5 text-white/40 cursor-not-allowed"
+          : "bg-white/10 hover:bg-white/20 text-white/85"
+        }`;
+        const meta = btn.querySelector(".podium-cat-meta");
+        if (meta) {
+          meta.textContent = locked ? "🔒" : (voting ? `🗳️ ${vCount}` : (isNext ? "(suivante)" : ""));
+        }
       });
 
       // Mini QR permanent hors lobby
@@ -417,6 +502,7 @@
           <div class="bg-white/10 rounded-2xl px-4 py-3 flex items-center gap-3 ${p.connected ? "" : "opacity-40"}">
             <span class="text-4xl">${esc(p.avatar)}</span>
             <span class="text-xl font-semibold truncate flex-1">${esc(p.name)}</span>
+            ${p.beginner ? `<span title="Débutant" class="text-sm bg-emerald-500/25 text-emerald-200 rounded-full px-2 py-0.5">🌱</span>` : ""}
             <span class="w-2.5 h-2.5 rounded-full ${p.connected ? "bg-emerald-400" : "bg-slate-500"}"></span>
           </div>`).join("")
           : `<div class="col-span-full text-xl opacity-60 pulse-soft">En attente des premiers joueurs…</div>`;
@@ -451,6 +537,8 @@
     let profile = null;
     try { profile = JSON.parse(localStorage.getItem("qal_profile") || "null"); } catch (_) {}
     let selectedAvatar = (profile && profile.avatar) || AVATARS[Math.floor(Math.random() * AVATARS.length)];
+    let selectedBeginner = !!(profile && profile.beginner);
+    let selectedVote = "";
     let ws = null, state = null, lastKey = "", joinSent = false, pendingChoice = null, celebrated = "", editing = false;
 
     app.innerHTML = `
@@ -460,7 +548,7 @@
           <div id="me" class="flex items-center gap-2 text-sm"></div>
           <div class="text-xs bg-white/10 rounded-full px-2 py-1 font-mono">${esc(code || "?????")}</div>
         </header>
-        <main id="pl-main" class="flex-1 min-h-0 p-4 flex flex-col"></main>
+        <main id="pl-main" class="flex-1 min-h-0 p-4 flex flex-col overflow-y-auto"></main>
       </div>`;
 
     if (code.length !== 5) { showError("Code de salle invalide. Scannez à nouveau le QR code affiché sur la TV."); return; }
@@ -478,8 +566,9 @@
         state = msg;
         if (!state.joined && profile && profile.name && !joinSent) {
           joinSent = true;
-          sendMsg({ type: "JOIN", name: profile.name, avatar: profile.avatar });
+          sendMsg({ type: "JOIN", name: profile.name, avatar: profile.avatar, beginner: !!profile.beginner });
         }
+        if (state.joined) selectedBeginner = !!state.my_beginner;
         if (state.phase !== "QUESTION" || state.my_answer !== null) pendingChoice = null;
         render();
       };
@@ -504,11 +593,97 @@
         ? `<span class="text-2xl">${esc(s.avatar)}</span><span class="font-semibold max-w-[8rem] truncate">${esc(s.name)}</span><span class="bg-amber-400 text-slate-900 font-bold rounded-full px-2">${s.score}</span>`
         : "";
       const answered = s.my_answer !== null || pendingChoice !== null;
-      const key = (!s.joined || editing) ? "join" : `${s.phase}|${s.q_index}|${answered}`;
+      const key = (!s.joined || editing)
+        ? `join|${!!s.voting_enabled}`
+        : (s.phase === "LOBBY" || s.phase === "PODIUM")
+          ? `${s.phase}|${s.q_index}|${!!s.voting_enabled}`
+          : `${s.phase}|${s.q_index}|${answered}`;
       if (key !== lastKey) { lastKey = key; buildView(); }
+      updatePlayerDynamic();
+    }
+
+    function updatePlayerDynamic() {
+      const s = state;
       setText("pl-timer", fmt(s.timer));
       setText("pl-count", s.players_count);
       setText("pl-cat", `${catIcon(s.category)} ${s.category || ""}`);
+      setText("pl-next-cat", `${catIcon(s.next_category)} ${s.next_category || ""}`);
+
+      const bCount = s.beginner_count || 0;
+      const bTotal = s.beginner_total || 0;
+      setText("pl-diff-info", s.beginner_mode
+        ? `🌱 Niveau Débutant actif (${bCount}/${bTotal} débutants)`
+        : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`);
+
+      const begCb = $("pl-beginner");
+      if (begCb) begCb.checked = !!s.my_beginner;
+
+      const played = new Set(s.played_categories || []);
+      const votes = s.votes || {};
+      document.querySelectorAll(".pl-vote-btn").forEach(btn => {
+        const cat = btn.dataset.cat;
+        const locked = played.has(cat);
+        const mine = s.joined && !editing ? (s.my_vote === cat) : (selectedVote === cat);
+        const vCount = votes[cat] || 0;
+        btn.disabled = locked;
+        btn.className = `pl-vote-btn rounded-xl px-3 py-2 text-xs font-bold transition flex items-center justify-between gap-2 ${
+          locked ? "bg-white/5 text-white/35 cursor-not-allowed"
+          : mine ? "bg-amber-400 text-slate-900 ring-2 ring-amber-200"
+          : "bg-white/10 active:scale-95 text-white"
+        }`;
+        const meta = btn.querySelector(".pl-vote-meta");
+        if (meta) meta.textContent = locked ? "🔒" : `🗳️ ${vCount}`;
+      });
+    }
+
+    function voteSectionHtml(s) {
+      if (!s.voting_enabled) return "";
+      const cats = s.categories || [];
+      return `
+        <div class="w-full bg-white/10 border border-white/15 rounded-2xl p-3 text-left">
+          <div class="text-xs uppercase opacity-75 mb-2 font-bold">🗳️ Vote pour la catégorie</div>
+          <div class="grid grid-cols-1 gap-1.5">
+            ${cats.map(cat => `
+              <button type="button" data-cat="${esc(cat)}" class="pl-vote-btn rounded-xl px-3 py-2 text-xs font-bold transition flex items-center justify-between gap-2 bg-white/10">
+                <span>${catIcon(cat)} ${esc(cat)}</span>
+                <span class="pl-vote-meta"></span>
+              </button>`).join("")}
+          </div>
+        </div>`;
+    }
+
+    function bindVoteButtons(root, onPick) {
+      root.querySelectorAll(".pl-vote-btn").forEach(btn => {
+        btn.onclick = () => {
+          if (btn.disabled) return;
+          onPick(btn.dataset.cat);
+        };
+      });
+    }
+
+    function beginnerToggleHtml(s) {
+      return `
+        <label class="w-full flex items-center gap-3 bg-white/10 border border-white/15 rounded-2xl px-4 py-2.5 cursor-pointer">
+          <input id="pl-beginner" type="checkbox" class="w-5 h-5 accent-amber-400" ${s.my_beginner ? "checked" : ""} />
+          <div class="text-left flex-1">
+            <div class="text-sm font-bold">🌱 Mode Débutant</div>
+            <div id="pl-diff-info" class="text-xs opacity-75"></div>
+          </div>
+        </label>`;
+    }
+
+    function bindBeginnerToggle() {
+      const cb = $("pl-beginner");
+      if (cb) {
+        cb.onchange = () => {
+          selectedBeginner = cb.checked;
+          if (profile) {
+            profile.beginner = selectedBeginner;
+            localStorage.setItem("qal_profile", JSON.stringify(profile));
+          }
+          sendMsg({ type: "VOTE", beginner: selectedBeginner });
+        };
+      }
     }
 
     function buildView() {
@@ -516,7 +691,7 @@
 
       if (!s.joined || editing) {
         main.innerHTML = `
-          <div class="flex-1 flex flex-col gap-5 justify-center pop">
+          <div class="flex-1 flex flex-col gap-4 justify-center pop py-2">
             <h1 class="text-3xl font-black text-center">Rejoins la partie !</h1>
             <div>
               <div class="text-sm uppercase opacity-70 mb-2">Choisis ton avatar</div>
@@ -527,9 +702,17 @@
             <div>
               <div class="text-sm uppercase opacity-70 mb-2">Ton pseudo</div>
               <input id="name" maxlength="16" autocomplete="off" placeholder="Ex : Super Quizzeur"
-                class="w-full rounded-2xl bg-white text-slate-900 text-xl font-bold px-4 py-4 outline-none focus:ring-4 ring-amber-300"
+                class="w-full rounded-2xl bg-white text-slate-900 text-xl font-bold px-4 py-3.5 outline-none focus:ring-4 ring-amber-300"
                 value="${esc((profile && profile.name) || "")}" />
             </div>
+            <label class="flex items-center gap-3 bg-white/10 border border-white/15 rounded-2xl px-4 py-3 cursor-pointer">
+              <input id="join-beginner" type="checkbox" class="w-6 h-6 accent-amber-400" ${selectedBeginner ? "checked" : ""} />
+              <div class="text-left">
+                <div class="font-bold text-base">🌱 Débutant</div>
+                <div class="text-xs opacity-75">Questions plus faciles si &gt; 50 % des joueurs cochent Débutant</div>
+              </div>
+            </label>
+            ${voteSectionHtml(s)}
             <button id="join" class="w-full rounded-2xl bg-amber-400 text-slate-900 text-2xl font-black py-4 shadow-xl active:scale-95 transition">C'est parti ! 🚀</button>
             <div id="join-err" class="text-center text-rose-300 h-5"></div>
           </div>`;
@@ -538,14 +721,22 @@
           main.querySelectorAll(".avatar").forEach(b => b.classList.remove("ring-4", "ring-amber-300", "bg-white/25", "scale-110"));
           btn.classList.add("ring-4", "ring-amber-300", "bg-white/25", "scale-110");
         });
+        $("join-beginner").onchange = (e) => { selectedBeginner = e.target.checked; };
+        bindVoteButtons(main, (cat) => {
+          selectedVote = cat;
+          updatePlayerDynamic();
+        });
         const doJoin = () => {
           const name = $("name").value.trim();
           if (!name) { setText("join-err", "Entre un pseudo 🙂"); return; }
-          profile = { name, avatar: selectedAvatar };
+          selectedBeginner = $("join-beginner").checked;
+          profile = { name, avatar: selectedAvatar, beginner: selectedBeginner };
           localStorage.setItem("qal_profile", JSON.stringify(profile));
           joinSent = true;
           editing = false;
-          sendMsg({ type: "JOIN", name, avatar: selectedAvatar });
+          const payload = { type: "JOIN", name, avatar: selectedAvatar, beginner: selectedBeginner };
+          if (selectedVote) payload.vote_category = selectedVote;
+          sendMsg(payload);
           $("join").disabled = true;
           $("join").textContent = "Connexion…";
         };
@@ -556,19 +747,22 @@
 
       if (s.phase === "LOBBY") {
         main.innerHTML = `
-          <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 pop">
-            <div class="text-8xl">${esc(s.avatar)}</div>
-            <div class="text-3xl font-black">Bienvenue ${esc(s.name)} !</div>
+          <div class="flex-1 flex flex-col items-center justify-center text-center gap-3 pop py-2">
+            <div class="text-7xl">${esc(s.avatar)}</div>
+            <div class="text-2xl font-black">Bienvenue ${esc(s.name)} !</div>
             <div id="pl-cat" class="bg-amber-400/20 border border-amber-300/40 text-amber-200 rounded-full px-4 py-1.5 text-sm font-bold"></div>
-            <div class="opacity-80">Tu es inscrit. Garde les yeux sur l'écran 📺</div>
-            <div class="mt-2 bg-white/10 rounded-3xl px-8 py-5">
-              <div class="text-sm uppercase opacity-70">La partie commence dans</div>
-              <div id="pl-timer" class="text-6xl font-black font-mono"></div>
+            <div class="bg-white/10 rounded-3xl px-8 py-3">
+              <div class="text-xs uppercase opacity-70">La partie commence dans</div>
+              <div id="pl-timer" class="text-5xl font-black font-mono"></div>
             </div>
-            <div class="opacity-70"><span id="pl-count"></span> joueur(s) dans la salle</div>
-            <button id="edit" class="text-sm underline opacity-60 mt-2">Modifier mon profil</button>
+            <div class="text-sm opacity-75"><span id="pl-count"></span> joueur(s) dans la salle</div>
+            ${beginnerToggleHtml(s)}
+            ${voteSectionHtml(s)}
+            <button id="edit" class="text-sm underline opacity-60 mt-1">Modifier mon profil</button>
           </div>`;
         $("edit").onclick = () => { editing = true; render(); };
+        bindBeginnerToggle();
+        bindVoteButtons(main, (cat) => sendMsg({ type: "VOTE", category: cat }));
         return;
       }
 
@@ -660,20 +854,24 @@
       if (s.phase === "PODIUM") {
         const medal = { 1: "🥇", 2: "🥈", 3: "🥉" }[s.rank] || "🎉";
         main.innerHTML = `
-          <div class="flex-1 flex flex-col items-center justify-center text-center gap-3 pop">
-            <div class="text-7xl">${medal}</div>
-            <div class="text-xl opacity-80">Tu termines</div>
+          <div class="flex-1 flex flex-col items-center justify-center text-center gap-3 pop py-2">
+            <div class="text-6xl">${medal}</div>
+            <div class="text-lg opacity-80">Tu termines</div>
             <div class="text-5xl font-black">${s.rank ? `${s.rank}<sup class="text-2xl">${s.rank === 1 ? "er" : "e"}</sup>` : "-"}</div>
-            <div class="text-lg">sur ${s.players_count} avec <b class="text-amber-300">${s.score} pts</b></div>
-            <div class="w-full bg-white/10 rounded-2xl p-3 mt-1 text-left">
+            <div class="text-base">sur ${s.players_count} avec <b class="text-amber-300">${s.score} pts</b></div>
+            <div class="w-full bg-white/10 rounded-2xl p-3 text-left">
               ${s.top3.map((p, i) => `<div class="flex items-center gap-3 py-1"><span>${["🥇", "🥈", "🥉"][i]}</span><span class="text-2xl">${esc(p.avatar)}</span><span class="flex-1 truncate font-semibold">${esc(p.name)}</span><b>${p.score}</b></div>`).join("")}
             </div>
             <div class="w-full bg-amber-400/15 border border-amber-300/40 rounded-2xl px-4 py-2 text-sm">
               Catégorie suivante proposée :<br />
-              <b class="text-amber-300 text-base">${catIcon(s.next_category)} ${esc(s.next_category)}</b>
+              <b id="pl-next-cat" class="text-amber-300 text-base">${catIcon(s.next_category)} ${esc(s.next_category)}</b>
             </div>
+            ${beginnerToggleHtml(s)}
+            ${voteSectionHtml(s)}
             <div class="opacity-60 text-sm">Nouvelle partie dans <span id="pl-timer"></span> s</div>
           </div>`;
+        bindBeginnerToggle();
+        bindVoteButtons(main, (cat) => sendMsg({ type: "VOTE", category: cat }));
         const k = `${s.category}|${s.q_total}|${s.score}`;
         if (s.rank && s.rank <= 3 && typeof confetti === "function" && celebrated !== k) {
           celebrated = k;
