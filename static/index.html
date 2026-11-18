@@ -967,12 +967,14 @@
             <div class="font-black text-lg">Laser <span class="text-amber-300">Quiz</span></div>
           </div>
           <div id="me" class="flex items-center gap-1.5 text-sm min-w-0"></div>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <button id="btn-leave" class="hidden text-xs bg-rose-600/80 hover:bg-rose-600 rounded-full px-2.5 py-1 font-bold">🚪 Quitter</button>
-            <div class="text-xs bg-white/10 rounded-full px-2 py-1 font-mono">${esc(code || "?????")}</div>
-          </div>
+          <div class="text-xs bg-white/10 rounded-full px-2 py-1 font-mono shrink-0">${esc(code || "?????")}</div>
         </header>
         <main id="pl-main" class="flex-1 min-h-0 p-4 flex flex-col overflow-y-auto"></main>
+        <footer id="pl-footer" class="hidden px-4 pb-3 pt-2 border-t border-white/10 shrink-0">
+          <div class="flex justify-center">
+            <button id="btn-leave" class="text-xs bg-rose-600/80 hover:bg-rose-600 rounded-full px-4 py-1.5 font-bold">🚪 Quitter la partie</button>
+          </div>
+        </footer>
       </div>`;
 
     $("btn-leave").onclick = () => {
@@ -1043,7 +1045,7 @@
       $("me").innerHTML = s.joined
         ? `<span class="text-xl">${esc(s.avatar)}</span><span class="font-semibold max-w-[6.5rem] truncate">${esc(s.name)}</span><span class="bg-amber-400 text-slate-900 font-bold rounded-full px-2">${s.score}</span>`
         : "";
-      $("btn-leave").classList.toggle("hidden", !s.joined);
+      $("pl-footer").classList.toggle("hidden", !s.joined);
       const answered = s.my_answer !== null || pendingChoice !== null;
       const key = (!s.joined || editing)
         ? `join|${!!s.voting_enabled}|${kickedReason}`
