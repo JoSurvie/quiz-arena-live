@@ -128,7 +128,7 @@ Calculés lors de `Room.reveal()` et ordonnés par priorité pour l'affichage an
 | 10 | `FIRST_BLOOD` | `🎯 DÉGAINÉ EN PREMIER !` | Premier joueur à avoir soumis une bonne réponse sur la question courante |
 
 ### Partage social en fin de partie (Mobile — phase `PODIUM`)
-- L'interface mobile génère dynamiquement une **carte image PNG `1080×1350`** sur `<canvas>` HTML5 contenant le branding Laser Quiz, l'avatar, le pseudo, le rang final, le score total, la catégorie jouée et les badges gagnés.
+- L'interface mobile génère dynamiquement une **carte image PNG `1080×1350`** sur `<canvas>` HTML5 contenant le **logo Laser Game Evolution** tout en haut (chargé sans erreur CORS via le proxy `/api/logo`), le branding Laser Quiz, l'avatar, le pseudo, le rang final, le score total, la catégorie jouée et les badges gagnés.
 - Boutons de partage disponibles :
   - **Partage natif (`navigator.share`)** avec fichier PNG si supporté par le navigateur mobile
   - Raccourcis directs **X (Twitter)**, **Facebook**, **WhatsApp**
@@ -253,6 +253,7 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 ### Routes HTTP
 - `GET /` — Sert [static/index.html](static/index.html)
 - `GET /health` — Sonde de santé serveur (pour Render / monitoring)
+- `GET /api/logo` — Proxy PNG en cache mémoire pour le logo Laser Game Evolution (garantit l'export `<canvas>` sans erreur CORS)
 - `GET /api/photobooth?url=...&limit=18&order=asc&force=0` — Proxy JSON Simple Booth avec cache 90 s
 - `GET /api/stats` — État de configuration Google Sheets et 50 dernières parties en mémoire (`GAME_LOGS_HISTORY`)
 - `POST /api/stats/config` — Configure `webhook_url` dans `stats_config.json`

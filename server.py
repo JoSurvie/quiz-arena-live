@@ -1443,6 +1443,41 @@ async def health() -> dict[str, Any]:
     return {"status": "ok", "rooms": len(rooms), "questions": len(QUESTIONS)}
 
 
+LOGO_REMOTE_URL = "https://lasergame-evolution.ca/wp-content/uploads/2025/01/CANADA-vector-logo-color-bl-black-copie-01.png"
+_LOGO_CACHE: bytes | None = None
+
+
+def _fetch_logo_bytes() -> bytes:
+    req = urllib.request.Request(
+        LOGO_REMOTE_URL,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return resp.read()
+
+
+@app.get("/api/logo")
+async def api_logo() -> Response:
+    global _LOGO_CACHE
+    if _LOGO_CACHE is None:
+        try:
+            data = await asyncio.to_thread(_fetch_logo_bytes)
+            if data:
+                _LOGO_CACHE = data
+        except Exception:
+            pass
+    if not _LOGO_CACHE:
+        raise HTTPException(status_code=404, detail="Logo indisponible.")
+    return Response(
+        content=_LOGO_CACHE,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 @app.get("/api/photobooth")
 async def api_photobooth(
     url: str,

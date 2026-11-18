@@ -1763,7 +1763,19 @@
             <div class="opacity-60 text-sm">Nouvelle partie dans <span id="pl-timer"></span> s</div>
           </div>`;
 
+        function loadShareLogo() {
+          const trySrc = (src, useCors) => new Promise(resolve => {
+            const img = new Image();
+            if (useCors) img.crossOrigin = "anonymous";
+            img.onload = () => resolve(img.naturalWidth > 0 ? img : null);
+            img.onerror = () => resolve(null);
+            img.src = src;
+          });
+          return trySrc("/api/logo", false).then(img => img || trySrc(LOGO_URL, true));
+        }
+
         async function makeShareCardBlob() {
+          const logoImg = await loadShareLogo();
           const canvas = document.createElement("canvas");
           canvas.width = 1080;
           canvas.height = 1350;
@@ -1776,19 +1788,40 @@
           ctx.fillRect(0, 0, 1080, 1350);
 
           ctx.textAlign = "center";
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "900 68px system-ui, sans-serif";
-          ctx.fillText("LASER QUIZ", 540, 145);
-          ctx.fillStyle = "#fcd34d";
-          ctx.font = "700 32px system-ui, sans-serif";
-          ctx.fillText(`${catIcon(s.category)} ${s.category} · ${s.difficulty === "debutant" ? "Débutant" : "Standard"}`, 540, 210);
+          if (logoImg) {
+            const scale = Math.min(460 / logoImg.naturalWidth, 115 / logoImg.naturalHeight);
+            const drawW = logoImg.naturalWidth * scale;
+            const drawH = logoImg.naturalHeight * scale;
+            ctx.drawImage(logoImg, (1080 - drawW) / 2, 42 + (115 - drawH) / 2, drawW, drawH);
 
-          ctx.font = "170px system-ui, sans-serif";
-          ctx.fillText(medal, 540, 440);
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "900 58px system-ui, sans-serif";
+            ctx.fillText("LASER QUIZ", 540, 212);
+            ctx.fillStyle = "#fcd34d";
+            ctx.font = "700 32px system-ui, sans-serif";
+            ctx.fillText(`${catIcon(s.category)} ${s.category} · ${s.difficulty === "debutant" ? "Débutant" : "Standard"}`, 540, 266);
 
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "900 64px system-ui, sans-serif";
-          ctx.fillText(`${s.avatar} ${s.name}`, 540, 565);
+            ctx.font = "155px system-ui, sans-serif";
+            ctx.fillText(medal, 540, 465);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "900 64px system-ui, sans-serif";
+            ctx.fillText(`${s.avatar} ${s.name}`, 540, 580);
+          } else {
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "900 68px system-ui, sans-serif";
+            ctx.fillText("LASER QUIZ", 540, 145);
+            ctx.fillStyle = "#fcd34d";
+            ctx.font = "700 32px system-ui, sans-serif";
+            ctx.fillText(`${catIcon(s.category)} ${s.category} · ${s.difficulty === "debutant" ? "Débutant" : "Standard"}`, 540, 210);
+
+            ctx.font = "170px system-ui, sans-serif";
+            ctx.fillText(medal, 540, 440);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "900 64px system-ui, sans-serif";
+            ctx.fillText(`${s.avatar} ${s.name}`, 540, 565);
+          }
 
           ctx.fillStyle = "#fcd34d";
           ctx.font = "900 130px system-ui, sans-serif";
