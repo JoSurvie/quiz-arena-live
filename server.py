@@ -22,8 +22,10 @@ QUESTIONS_FILE = BASE_DIR / "questions.json"
 LOBBY_DURATION = 240
 QUESTION_DURATION = 20
 REVEAL_DURATION = 10
+INTER_PODIUM_DURATION = 10
 PODIUM_DURATION = 60
-QUESTIONS_PER_GAME = 10
+QUESTIONS_PER_GAME = 15
+CHECKPOINT_INTERVAL = 5
 
 MIN_POINTS = 500
 MAX_POINTS = 1000
@@ -65,6 +67,10 @@ def load_questions() -> list[dict[str, Any]]:
 
 
 QUESTIONS = load_questions()
+CATEGORIES: list[str] = list(dict.fromkeys(q["category"] for q in QUESTIONS))
+QUESTIONS_BY_CATEGORY: dict[str, list[dict[str, Any]]] = {
+    cat: [q for q in QUESTIONS if q["category"] == cat] for cat in CATEGORIES
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -100,12 +106,21 @@ class Room:
         self.speed = 1
         self.players: dict[str, Player] = {}
         self.tvs: set[WebSocket] = set()
+        self.cat_index = 0
         self.questions: list[dict[str, Any]] = []
         self.q_index = -1
         self.counts = [0, 0, 0, 0]
         self.task: asyncio.Task | None = None
         self.last_tick = time.monotonic()
         self.empty_since: float | None = None
+
+    @property
+    def category(self) -> str:
+        return CATEGORIES[self.cat_index % len(CATEGORIES)]
+
+    @property
+    def next_category(self) -> str:
+        return CATEGORIES[(self.cat_index + 1) % len(CATEGORIES)]
 
     # ----- connexions ----------------------------------------------------- #
     def has_connections(self) -> bool:
@@ -144,7 +159,8 @@ class Room:
         self.last_tick = time.monotonic()
 
     def start_game(self) -> None:
-        self.questions = random.sample(QUESTIONS, min(QUESTIONS_PER_GAME, len(QUESTIONS)))
+        pool = QUESTIONS_BY_CATEGORY.get(self.category, QUESTIONS)
+        self.questions = random.sample(pool, min(QUESTIONS_PER_GAME, len(pool)))
         self.q_index = 0
         for p in self.players.values():
             p.score = 0
@@ -152,6 +168,22 @@ class Room:
             p.last_correct = None
             p.reset_round()
         self.set_phase("QUESTION", QUESTION_DURATION)
+
+    def select_category(self, category: str | None = None, index: Any = None) -> bool:
+        target_idx = None
+        if isinstance(category, str) and category in QUESTIONS_BY_CATEGORY:
+            target_idx = CATEGORIES.index(category)
+        elif index is not None:
+            try:
+                idx = int(index)
+                if 0 <= idx < len(CATEGORIES):
+                    target_idx = idx
+            except (TypeError, ValueError):
+                pass
+        if target_idx is None:
+            return False
+        self.cat_index = target_idx
+        return True
 
     def reveal(self) -> None:
         q = self.current_question()
@@ -175,6 +207,7 @@ class Room:
         self.questions = []
         self.q_index = -1
         for p in self.players.values():
+            p.score = 0
             p.reset_round()
             p.last_points = 0
             p.last_correct = None
@@ -187,14 +220,24 @@ class Room:
         elif self.phase == "QUESTION":
             self.reveal()
         elif self.phase == "REVEAL":
-            if self.q_index + 1 < len(self.questions):
-                self.q_index += 1
-                for p in self.players.values():
-                    p.reset_round()
-                self.set_phase("QUESTION", QUESTION_DURATION)
+            next_q = self.q_index + 1
+            if next_q < len(self.questions):
+                if next_q % CHECKPOINT_INTERVAL == 0:
+                    self.set_phase("INTER_PODIUM", INTER_PODIUM_DURATION)
+                else:
+                    self.q_index = next_q
+                    for p in self.players.values():
+                        p.reset_round()
+                    self.set_phase("QUESTION", QUESTION_DURATION)
             else:
                 self.set_phase("PODIUM", PODIUM_DURATION)
-        else:  # PODIUM -> nouveau cycle
+        elif self.phase == "INTER_PODIUM":
+            self.q_index += 1
+            for p in self.players.values():
+                p.reset_round()
+            self.set_phase("QUESTION", QUESTION_DURATION)
+        else:  # PODIUM -> catégorie suivante & nouveau cycle
+            self.cat_index = (self.cat_index + 1) % len(CATEGORIES)
             self.back_to_lobby()
 
     def on_timer_expired(self) -> None:
@@ -236,6 +279,10 @@ class Room:
             "timer": max(0, int(self.timer)),
             "duration": self.duration,
             "speed": self.speed,
+            "categories": CATEGORIES,
+            "category": self.category,
+            "cat_index": self.cat_index,
+            "next_category": self.next_category,
             "q_index": self.q_index,
             "q_total": len(self.questions),
             "question": self._question_payload(with_answer=reveal),
@@ -255,6 +302,10 @@ class Room:
             "phase": self.phase,
             "timer": max(0, int(self.timer)),
             "duration": self.duration,
+            "categories": CATEGORIES,
+            "category": self.category,
+            "cat_index": self.cat_index,
+            "next_category": self.next_category,
             "q_index": self.q_index,
             "q_total": len(self.questions),
             "question": self._question_payload(with_answer=reveal),
@@ -379,6 +430,20 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                 await current.broadcast()
             elif cmd == "TOGGLE_SPEED":
                 current.speed = 5 if current.speed == 1 else 1
+                await current.broadcast()
+            elif cmd == "SELECT_CATEGORY":
+                if current.phase in ("LOBBY", "PODIUM") and current.select_category(
+                    msg.get("category"), msg.get("index")
+                ):
+                    if current.phase == "PODIUM" and msg.get("start"):
+                        current.start_game()
+                    await current.broadcast()
+            elif cmd == "START_NEXT_CATEGORY":
+                current.cat_index = (current.cat_index + 1) % len(CATEGORIES)
+                if current.joined_players():
+                    current.start_game()
+                else:
+                    current.back_to_lobby()
                 await current.broadcast()
     except WebSocketDisconnect:
         pass
