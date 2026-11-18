@@ -1056,7 +1056,7 @@ async def health() -> dict[str, Any]:
 @app.get("/api/photobooth")
 async def api_photobooth(
     url: str,
-    limit: int = 50,
+    limit: int = 18,
     order: str = "asc",
     force: int = 0,
 ) -> dict[str, Any]:

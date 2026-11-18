@@ -55,7 +55,14 @@
       gap: 1rem;
       width: max-content;
       will-change: transform;
-      animation: marqueeLeftToRight var(--pb-duration, 160s) linear infinite;
+      backface-visibility: hidden;
+      animation: marqueeLeftToRight var(--pb-duration, 90s) linear infinite;
+    }
+    .pb-marquee-track img {
+      backface-visibility: hidden;
+    }
+    #timer, #pb-section, #player-list {
+      contain: layout paint;
     }
     @keyframes flamePulse {
       0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(251, 146, 60, .65)); }
@@ -135,7 +142,12 @@
     return m > 0 ? `${m}:${String(s).padStart(2, "0")}` : String(s);
   }
   function $(id) { return document.getElementById(id); }
-  function setText(id, v) { const el = $(id); if (el) el.textContent = v; }
+  function setText(id, v) {
+    const el = $(id);
+    if (!el) return;
+    const next = String(v ?? "");
+    if (el.textContent !== next) el.textContent = next;
+  }
 
   if (params.has("room")) initPlayer(); else initTV();
 
@@ -182,6 +194,11 @@
     let pbStatusText = "Chargement…";
     let pbTrackKey = "";
     let regieCatsKey = "";
+    let lastPlayersKey = "";
+    let lastCatsStateKey = "";
+    let lastDiffKey = "";
+    let lastRegieOpen = false;
+    let preloadToken = 0;
 
     function currentStore() {
       return pbStores.find(s => s.name === pbSelectedStore) || pbStores[0];
@@ -193,10 +210,17 @@
       setCookie("lge_pb_opts", JSON.stringify(pbOpts));
     }
     function preloadPhotos(list) {
-      for (const p of list) {
+      const token = ++preloadToken;
+      let idx = 0;
+      function next() {
+        if (token !== preloadToken || idx >= list.length) return;
+        const p = list[idx++];
         const img = new Image();
-        img.src = p.url || p.thumb;
+        img.decoding = "async";
+        img.onload = img.onerror = next;
+        img.src = p.thumb || p.url;
       }
+      next();
     }
     async function loadPhotobooth(force = false) {
       if (!force && !pbOpts.enabled) return;
@@ -210,13 +234,13 @@
       pbStatusText = "Actualisation…";
       setText("pb-regie-status", `${store.name} : actualisation…`);
       try {
-        const res = await fetch(`/api/photobooth?url=${encodeURIComponent(store.url)}&limit=50&order=${encodeURIComponent(pbOpts.order)}&force=${force ? 1 : 0}`);
+        const res = await fetch(`/api/photobooth?url=${encodeURIComponent(store.url)}&limit=18&order=${encodeURIComponent(pbOpts.order)}&force=${force ? 1 : 0}`);
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.detail || "Erreur chargement galerie");
         pbPhotos = Array.isArray(data.photos) ? data.photos : [];
         pbStatusText = pbPhotos.length ? `${pbPhotos.length} photo(s) · ${pbOpts.order === "asc" ? "Chronologique" : "Récentes d'abord"}` : "Aucune photo disponible";
         setText("pb-regie-status", `${store.name} : ${pbPhotos.length} photo(s)`);
-        preloadPhotos(pbPhotos);
+        if (pbOpts.enabled) preloadPhotos(pbPhotos);
       } catch (e) {
         pbStatusText = "Impossible de charger le photobooth";
         setText("pb-regie-status", `Erreur : ${e.message || e}`);
@@ -250,7 +274,7 @@
           <div class="flex items-center gap-3">
             <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-11 w-auto object-contain" />
             <div class="text-3xl font-black tracking-tight">Laser <span class="text-amber-300">Quiz</span></div>
-            <span id="live" class="text-xs font-bold bg-rose-600 px-2 py-0.5 rounded-full pulse-soft">● LIVE</span>
+            <span id="live" class="text-xs font-bold bg-rose-600 px-2 py-0.5 rounded-full">● LIVE</span>
             <span id="speed-badge" class="hidden text-xs font-bold bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full">⚡ 5x</span>
             <span id="vote-badge" class="hidden text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
             <span id="diff-badge" class="text-xs font-bold bg-white/15 px-2.5 py-0.5 rounded-full"></span>
@@ -352,13 +376,22 @@
       }
       const sec = $("pb-section");
       if (sec) sec.classList.toggle("hidden", !pbOpts.enabled);
+      if (!pbOpts.enabled) {
+        preloadToken++;
+        pbTrackKey = "";
+        const strip = $("pb-strip");
+        if (strip && strip.innerHTML) strip.innerHTML = "";
+      }
     }
 
     $("btn-pb-toggle").onclick = () => {
       pbOpts.enabled = !pbOpts.enabled;
       saveOptsCookie();
       applyPhotoboothVisibility();
-      if (pbOpts.enabled && !pbPhotos.length) loadPhotobooth(false);
+      if (pbOpts.enabled) {
+        if (!pbPhotos.length) loadPhotobooth(false);
+        else renderPhotoboothStrip(true);
+      }
     };
 
     function syncStoreSelect() {
@@ -450,28 +483,32 @@
 
     function renderPhotoboothStrip(forceRebuild) {
       const strip = $("pb-strip");
-      const store = currentStore();
-      setText("pb-store-label", store ? store.name : "");
-      setText("pb-count-label", pbStatusText);
       if (!strip) return;
+      if (!pbOpts.enabled) {
+        pbTrackKey = "";
+        if (strip.innerHTML) strip.innerHTML = "";
+        return;
+      }
+      const store = currentStore();
       if (!pbPhotos.length) {
         pbTrackKey = "";
-        strip.innerHTML = `<div class="w-full text-center text-sm opacity-60 pulse-soft">${esc(pbStatusText)}</div>`;
+        strip.innerHTML = `<div class="w-full text-center text-sm opacity-60">${esc(pbStatusText)}</div>`;
         return;
       }
       const key = `${store ? store.name : ""}|${pbOpts.speedSec}|${pbOpts.order}|${pbPhotos.map(p => p.code).join(",")}`;
       if (!forceRebuild && key === pbTrackKey && $("pb-track")) return;
       pbTrackKey = key;
       const block = [];
-      while (block.length < Math.max(pbPhotos.length, 10)) block.push(...pbPhotos);
+      const minItems = Math.min(18, Math.max(pbPhotos.length, 6));
+      while (block.length < minItems) block.push(...pbPhotos);
       const loopItems = [...block, ...block];
-      const duration = Math.max(20, block.length * pbOpts.speedSec);
+      const duration = Math.max(18, block.length * pbOpts.speedSec);
       strip.innerHTML = `
         <div id="pb-track" class="pb-marquee-track px-4" style="--pb-duration: ${duration}s">
           ${loopItems.map(p => `
             <div class="shrink-0 h-40 xl:h-48 rounded-2xl overflow-hidden bg-slate-900 border border-white/15 shadow-xl">
-              <img src="${esc(p.url || p.thumb)}" alt="Photobooth" loading="eager"
-                   onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${esc(p.thumb)}';}"
+              <img src="${esc(p.thumb || p.url)}" alt="Photobooth" decoding="async"
+                   onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${esc(p.url)}';}"
                    class="h-full w-auto object-contain" />
             </div>`).join("")}
         </div>`;
@@ -553,6 +590,9 @@
       const main = $("tv-main");
       const s = state;
       const cats = s.categories || [];
+      lastPlayersKey = "";
+      lastCatsStateKey = "";
+      lastDiffKey = "";
       if (s.phase === "LOBBY") {
         main.innerHTML = `
           <div class="h-full flex flex-col justify-between gap-2">
@@ -584,11 +624,6 @@
               </div>
             </div>
             <section id="pb-section" class="${pbOpts.enabled ? "" : "hidden"} h-48 xl:h-56 w-full bg-slate-950/70 border-t border-white/15 relative overflow-hidden flex items-center shrink-0">
-              <div class="absolute top-2 left-4 z-10 inline-flex items-center gap-2 bg-slate-950/85 border border-white/15 backdrop-blur px-3 py-1 rounded-full text-xs font-bold shadow">
-                <span>📸 Photobooth — <span id="pb-store-label" class="text-amber-300"></span></span>
-                <span class="opacity-50">·</span>
-                <span id="pb-count-label" class="opacity-80 font-normal"></span>
-              </div>
               <div id="pb-strip" class="w-full h-full flex items-center overflow-hidden"></div>
             </section>
           </div>`;
@@ -615,7 +650,7 @@
               <div id="timer" class="shrink-0 w-32 h-32 rounded-full bg-white/10 border-4 border-amber-300 flex items-center justify-center text-6xl font-black"></div>
               <h1 class="text-4xl md:text-6xl font-extrabold text-center leading-tight pop">${esc(s.question.q)}</h1>
             </div>
-            <div class="h-3 bg-white/10 rounded-full overflow-hidden"><div id="bar" class="h-full bg-amber-300 transition-all duration-1000 ease-linear" style="width:100%"></div></div>
+            <div class="h-3 bg-white/10 rounded-full overflow-hidden"><div id="bar" class="h-full bg-amber-300 origin-left transition-transform duration-1000 ease-linear" style="transform:scaleX(1)"></div></div>
             <div class="grid grid-cols-2 gap-4">
               ${s.question.options.map((o, i) => `
                 <div class="${COLORS[i]} rounded-2xl px-6 py-6 flex items-center gap-5 shadow-xl pop">
@@ -717,7 +752,7 @@
               </span>
               <span class="opacity-90">Reprise dans <b id="timer" class="text-amber-300 text-2xl"></b> s</span>
             </div>
-            <div class="h-2.5 bg-white/10 rounded-full overflow-hidden"><div id="bar" class="h-full bg-amber-300 transition-all duration-1000 ease-linear" style="width:100%"></div></div>
+            <div class="h-2.5 bg-white/10 rounded-full overflow-hidden"><div id="bar" class="h-full bg-amber-300 origin-left transition-transform duration-1000 ease-linear" style="transform:scaleX(1)"></div></div>
             <div class="flex-1 min-h-0 grid lg:grid-cols-3 gap-6 items-center">
               <div class="lg:col-span-2 h-full flex flex-col items-center justify-end pb-2 gap-4">
                 ${b.length ? podiumHtml(b, ["h-52", "h-36", "h-24"]) : `<div class="text-2xl opacity-60 my-auto">En attente des joueurs…</div>`}
@@ -796,30 +831,51 @@
       const bCount = s.beginner_count || 0;
       const bTotal = s.beginner_total || 0;
 
+      // 1. Chrono & barre GPU (transform: scaleX -> zéro reflow)
       setText("timer", fmt(s.timer));
       const bar = $("bar");
-      if (bar) bar.style.width = `${(s.timer / Math.max(1, s.duration)) * 100}%`;
+      if (bar) bar.style.transform = `scaleX(${Math.max(0, Math.min(1, s.timer / Math.max(1, s.duration)))})`;
       setText("answered", `${s.answered_count} / ${s.players.filter(p => p.connected).length} réponse(s)`);
       setText("btn-speed", `⚡ Vitesse : ${s.speed}x`);
-      $("speed-badge").classList.toggle("hidden", s.speed === 1);
       setText("btn-vote", `🗳️ Vote : ${voting ? "ON" : "OFF"}`);
-      $("vote-badge").classList.toggle("hidden", !voting);
 
-      const diffBadge = $("diff-badge");
-      if (diffBadge) {
-        const useBeg = s.phase === "LOBBY" || s.phase === "PODIUM" ? isBeg : s.difficulty === "debutant";
-        diffBadge.textContent = useBeg
-          ? `🌱 Débutant (${bCount}/${bTotal})`
-          : `🔥 Standard (${bCount}/${bTotal})`;
-        diffBadge.className = `text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
+      const speedBadge = $("speed-badge");
+      if (speedBadge && speedBadge.classList.contains("hidden") !== (s.speed === 1)) {
+        speedBadge.classList.toggle("hidden", s.speed === 1);
+      }
+      const voteBadge = $("vote-badge");
+      if (voteBadge && voteBadge.classList.contains("hidden") !== !voting) {
+        voteBadge.classList.toggle("hidden", !voting);
       }
 
-      // Catégories dans le menu Régie & badges du lobby
+      // 2. Badges de difficulté (uniquement si changement)
+      const diffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;
+      if (diffKey !== lastDiffKey) {
+        lastDiffKey = diffKey;
+        const diffBadge = $("diff-badge");
+        if (diffBadge) {
+          const useBeg = s.phase === "LOBBY" || s.phase === "PODIUM" ? isBeg : s.difficulty === "debutant";
+          diffBadge.textContent = useBeg
+            ? `🌱 Débutant (${bCount}/${bTotal})`
+            : `🔥 Standard (${bCount}/${bTotal})`;
+          diffBadge.className = `text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
+        }
+        const lobbyDiff = $("lobby-diff-badge");
+        if (lobbyDiff) {
+          lobbyDiff.textContent = isBeg
+            ? `🌱 Niveau Débutant (${bCount}/${bTotal} débutants)`
+            : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`;
+          lobbyDiff.className = `inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-bold ${isBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/10 text-white/85"}`;
+        }
+      }
+
+      // 3. Catégories dans le menu Régie & podium (uniquement si changement)
       const cats = s.categories || [];
       const regieCats = $("regie-cats");
       const cKey = cats.join("|");
       if (regieCats && cKey !== regieCatsKey) {
         regieCatsKey = cKey;
+        lastCatsStateKey = "";
         regieCats.innerHTML = cats.map(cat => `
           <button data-cat="${esc(cat)}" class="cat-btn rounded-xl px-3 py-2 text-xs font-bold transition bg-white/10 hover:bg-white/20 flex items-center justify-between gap-2 text-left">
             <span>${catIcon(cat)} ${esc(cat)}</span>
@@ -832,59 +888,57 @@
       setText("lobby-cat-name", `${catIcon(s.category)} ${s.category || ""}`);
       setText("regie-vote-hint", voting ? "🗳️ Vote joueurs actif" : "Sélection régie");
       if (s.phase === "LOBBY") renderPhotoboothStrip(false);
-      const lobbyDiff = $("lobby-diff-badge");
-      if (lobbyDiff) {
-        lobbyDiff.textContent = isBeg
-          ? `🌱 Niveau Débutant (${bCount}/${bTotal} débutants)`
-          : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`;
-        lobbyDiff.className = `inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-bold ${isBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/10 text-white/85"}`;
-      }
-      document.querySelectorAll(".cat-btn").forEach(btn => {
-        const cat = btn.dataset.cat;
-        const active = cat === s.category;
-        const locked = played.has(cat);
-        const vCount = votes[cat] || 0;
-        btn.disabled = voting && locked;
-        btn.classList.toggle("bg-amber-400", active);
-        btn.classList.toggle("text-slate-900", active);
-        btn.classList.toggle("ring-2", active);
-        btn.classList.toggle("ring-amber-200", active);
-        btn.classList.toggle("bg-white/10", !active);
-        btn.classList.toggle("hover:bg-white/20", !active && !(voting && locked));
-        btn.classList.toggle("opacity-40", locked && !active);
-        const meta = btn.querySelector(".cat-meta");
-        if (meta) {
-          meta.textContent = locked ? "🔒 Déjà jouée" : (voting ? `🗳️ ${vCount}` : "");
-        }
-      });
 
-      // Mise à jour dynamique du podium (catégorie suivante & votes en direct)
-      const nextBtn = $("btn-next-cat");
-      if (nextBtn) {
-        nextBtn.textContent = `🚀 Enchaîner sur : ${catIcon(s.next_category)} ${s.next_category}`;
-      }
-      document.querySelectorAll(".podium-cat-btn").forEach(btn => {
-        const cat = btn.dataset.cat;
-        const isNext = cat === s.next_category;
-        const locked = played.has(cat);
-        const vCount = votes[cat] || 0;
-        btn.disabled = voting && locked;
-        btn.className = `podium-cat-btn text-xs font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
-          isNext ? "bg-amber-400/25 border border-amber-300 text-amber-200"
-          : locked ? "bg-white/5 text-white/40 cursor-not-allowed"
-          : "bg-white/10 hover:bg-white/20 text-white/85"
-        }`;
-        const meta = btn.querySelector(".podium-cat-meta");
-        if (meta) {
-          meta.textContent = locked ? "🔒" : (voting ? `🗳️ ${vCount}` : (isNext ? "(suivante)" : ""));
+      const catsStateKey = `${s.category}|${s.next_category}|${voting}|${(s.played_categories || []).join(",")}|${cats.map(c => votes[c] || 0).join(",")}`;
+      if (catsStateKey !== lastCatsStateKey) {
+        lastCatsStateKey = catsStateKey;
+        document.querySelectorAll(".cat-btn").forEach(btn => {
+          const cat = btn.dataset.cat;
+          const active = cat === s.category;
+          const locked = played.has(cat);
+          const vCount = votes[cat] || 0;
+          btn.disabled = voting && locked;
+          btn.classList.toggle("bg-amber-400", active);
+          btn.classList.toggle("text-slate-900", active);
+          btn.classList.toggle("ring-2", active);
+          btn.classList.toggle("ring-amber-200", active);
+          btn.classList.toggle("bg-white/10", !active);
+          btn.classList.toggle("hover:bg-white/20", !active && !(voting && locked));
+          btn.classList.toggle("opacity-40", locked && !active);
+          const meta = btn.querySelector(".cat-meta");
+          if (meta) {
+            meta.textContent = locked ? "🔒 Déjà jouée" : (voting ? `🗳️ ${vCount}` : "");
+          }
+        });
+        const nextBtn = $("btn-next-cat");
+        if (nextBtn) {
+          nextBtn.textContent = `🚀 Enchaîner sur : ${catIcon(s.next_category)} ${s.next_category}`;
         }
-      });
+        document.querySelectorAll(".podium-cat-btn").forEach(btn => {
+          const cat = btn.dataset.cat;
+          const isNext = cat === s.next_category;
+          const locked = played.has(cat);
+          const vCount = votes[cat] || 0;
+          btn.disabled = voting && locked;
+          btn.className = `podium-cat-btn text-xs font-bold px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
+            isNext ? "bg-amber-400/25 border border-amber-300 text-amber-200"
+            : locked ? "bg-white/5 text-white/40 cursor-not-allowed"
+            : "bg-white/10 hover:bg-white/20 text-white/85"
+          }`;
+          const meta = btn.querySelector(".podium-cat-meta");
+          if (meta) {
+            meta.textContent = locked ? "🔒" : (voting ? `🗳️ ${vCount}` : (isNext ? "(suivante)" : ""));
+          }
+        });
+      }
 
-      // Mini QR permanent hors lobby
+      // 4. Mini QR permanent hors lobby
       const wrap = $("mini-qr-wrap");
       const showMini = s.phase !== "LOBBY" && roomCode;
-      wrap.classList.toggle("hidden", !showMini);
-      wrap.classList.toggle("flex", !!showMini);
+      if (wrap.classList.contains("hidden") !== !showMini) {
+        wrap.classList.toggle("hidden", !showMini);
+        wrap.classList.toggle("flex", !!showMini);
+      }
       if (roomCode && miniQrFor !== roomCode) {
         miniQrFor = roomCode;
         const box = $("mini-qr");
@@ -893,36 +947,38 @@
         setText("mini-code", roomCode);
       }
 
-      // Liste des joueurs (lobby)
-      const list = $("player-list");
-      if (list) {
-        setText("player-count", `(${s.players.length})`);
-        list.innerHTML = s.players.length ? s.players.map(p => `
-          <div class="bg-white/10 rounded-2xl px-4 py-3 flex items-center gap-3 ${p.connected ? "" : "opacity-40"}">
-            <span class="text-4xl">${esc(p.avatar)}</span>
-            <span class="text-xl font-semibold truncate flex-1">${esc(p.name)}</span>
-            ${p.beginner ? `<span title="Débutant" class="text-sm bg-emerald-500/25 text-emerald-200 rounded-full px-2 py-0.5">🌱</span>` : ""}
-            <span class="w-2.5 h-2.5 rounded-full ${p.connected ? "bg-emerald-400" : "bg-slate-500"}"></span>
-          </div>`).join("")
-          : `<div class="col-span-full text-xl opacity-60 pulse-soft">En attente des premiers joueurs…</div>`;
-      }
-
-      // Liste des joueurs avec bouton d'expulsion dans la Régie
-      const regiePlayers = $("regie-players");
-      if (regiePlayers) {
-        setText("regie-player-count", `(${s.players.length})`);
-        regiePlayers.innerHTML = s.players.length ? s.players.map(p => `
-          <div class="bg-white/5 rounded-xl px-2.5 py-1.5 flex items-center gap-2 text-xs">
-            <span class="w-2 h-2 rounded-full ${p.connected ? "bg-emerald-400" : "bg-rose-400"}"></span>
-            <span class="text-base">${esc(p.avatar)}</span>
-            <span class="flex-1 font-semibold truncate">${esc(p.name)}</span>
-            ${p.missed_streak > 0 ? `<span class="text-[10px] bg-amber-500/20 text-amber-200 rounded px-1.5 py-0.5">⚠️ ${p.missed_streak}/5</span>` : ""}
-            <button data-kick="${esc(p.id)}" title="Retirer de la salle" class="kick-btn bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg px-2 py-0.5 font-bold">✕</button>
-          </div>`).join("")
-          : `<div class="text-xs opacity-50">Aucun joueur connecté</div>`;
-        regiePlayers.querySelectorAll(".kick-btn").forEach(btn => {
-          btn.onclick = () => send("KICK_PLAYER", { player_id: btn.dataset.kick });
-        });
+      // 5. Liste des joueurs (Lobby + Régie) — reconstruite uniquement si changement réel
+      const playersKey = s.players.map(p => `${p.id}:${p.name}:${p.avatar}:${p.connected ? 1 : 0}:${p.beginner ? 1 : 0}:${p.missed_streak || 0}`).join("|");
+      if (playersKey !== lastPlayersKey) {
+        lastPlayersKey = playersKey;
+        const list = $("player-list");
+        if (list) {
+          setText("player-count", `(${s.players.length})`);
+          list.innerHTML = s.players.length ? s.players.map(p => `
+            <div class="bg-white/10 rounded-2xl px-4 py-3 flex items-center gap-3 ${p.connected ? "" : "opacity-40"}">
+              <span class="text-4xl">${esc(p.avatar)}</span>
+              <span class="text-xl font-semibold truncate flex-1">${esc(p.name)}</span>
+              ${p.beginner ? `<span title="Débutant" class="text-sm bg-emerald-500/25 text-emerald-200 rounded-full px-2 py-0.5">🌱</span>` : ""}
+              <span class="w-2.5 h-2.5 rounded-full ${p.connected ? "bg-emerald-400" : "bg-slate-500"}"></span>
+            </div>`).join("")
+            : `<div class="col-span-full text-xl opacity-60">En attente des premiers joueurs…</div>`;
+        }
+        const regiePlayers = $("regie-players");
+        if (regiePlayers) {
+          setText("regie-player-count", `(${s.players.length})`);
+          regiePlayers.innerHTML = s.players.length ? s.players.map(p => `
+            <div class="bg-white/5 rounded-xl px-2.5 py-1.5 flex items-center gap-2 text-xs">
+              <span class="w-2 h-2 rounded-full ${p.connected ? "bg-emerald-400" : "bg-rose-400"}"></span>
+              <span class="text-base">${esc(p.avatar)}</span>
+              <span class="flex-1 font-semibold truncate">${esc(p.name)}</span>
+              ${p.missed_streak > 0 ? `<span class="text-[10px] bg-amber-500/20 text-amber-200 rounded px-1.5 py-0.5">⚠️ ${p.missed_streak}/5</span>` : ""}
+              <button data-kick="${esc(p.id)}" title="Retirer de la salle" class="kick-btn bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg px-2 py-0.5 font-bold">✕</button>
+            </div>`).join("")
+            : `<div class="text-xs opacity-50">Aucun joueur connecté</div>`;
+          regiePlayers.querySelectorAll(".kick-btn").forEach(btn => {
+            btn.onclick = () => send("KICK_PLAYER", { player_id: btn.dataset.kick });
+          });
+        }
       }
     }
 
