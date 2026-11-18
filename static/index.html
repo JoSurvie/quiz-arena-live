@@ -44,6 +44,18 @@
       background-size: 200% 100%;
       animation: shine 2.4s linear infinite;
     }
+    @keyframes marqueeLeftToRight {
+      0% { transform: translate3d(-50%, 0, 0); }
+      100% { transform: translate3d(0, 0, 0); }
+    }
+    .pb-marquee-track {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      width: max-content;
+      will-change: transform;
+      animation: marqueeLeftToRight var(--pb-duration, 160s) linear infinite;
+    }
   </style>
 </head>
 <body class="text-white antialiased">
@@ -54,6 +66,25 @@
 
   const SHAPES = ["▲", "◆", "●", "■"];
   const LOGO_URL = "https://lasergame-evolution.ca/wp-content/uploads/2025/01/CANADA-vector-logo-color-bl-black-copie-01.png";
+  const DEFAULT_STORES = [
+    { name: "Sainte-Foy", url: "https://www.simplebooth.com/gallery/3DTLTk68fwVM-lge-fev-2026" },
+    { name: "Vanier", url: "https://www.simplebooth.com/gallery/8KonRrq3avT5-lge-fev-26" },
+    { name: "Brossard", url: "https://www.simplebooth.com/gallery/urjGcth7fSdh-lge-2026" },
+    { name: "Marché Central", url: "https://www.simplebooth.com/gallery/3vaHgUNcJUos-lge-fev-2026" },
+    { name: "Lévis", url: "https://www.simplebooth.com/gallery/ahebLG4GWjZF-lge-fev-2026" },
+    { name: "Sherbrooke", url: "https://www.simplebooth.com/gallery/XCaTpPmn6r3h-lge-fev-2026" },
+    { name: "Ste-Catherine", url: "https://www.simplebooth.com/gallery/ALkJDisegsdU-lge-fev-2026" }
+  ];
+  function setCookie(name, value, days = 365) {
+    document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/; max-age=${days * 86400}; SameSite=Lax`;
+  }
+  function getCookie(name) {
+    const prefix = encodeURIComponent(name) + "=";
+    for (const part of document.cookie.split("; ")) {
+      if (part.startsWith(prefix)) return decodeURIComponent(part.slice(prefix.length));
+    }
+    return null;
+  }
   const COLORS = ["bg-rose-500", "bg-sky-500", "bg-amber-400", "bg-emerald-500"];
   const AVATARS = ["😎", "🦊", "🐼", "🐸", "🦁", "🐙", "🦄", "🐯", "🐵", "🐧", "🤖", "👽", "🐲", "🍕", "🚀", "⚡"];
   const CAT_ICONS = {
@@ -93,6 +124,74 @@
     let miniQrFor = "";
     let confettiTimer = null;
     let wakeLock = null;
+
+    // --- Photobooth (cookies locaux par magasin) ---------------------------
+    let pbStores = (() => {
+      try {
+        const raw = getCookie("lge_pb_stores");
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (Array.isArray(parsed) && parsed.length) return parsed;
+      } catch (_) {}
+      return DEFAULT_STORES.map(s => ({ ...s }));
+    })();
+    let pbOpts = (() => {
+      try {
+        const raw = getCookie("lge_pb_opts");
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (parsed && typeof parsed === "object") {
+          return { speedSec: Number(parsed.speedSec) || 4, order: parsed.order === "desc" ? "desc" : "asc" };
+        }
+      } catch (_) {}
+      return { speedSec: 4, order: "asc" };
+    })();
+    let pbSelectedStore = getCookie("lge_pb_store") || pbStores[0].name;
+    if (!pbStores.some(s => s.name === pbSelectedStore)) pbSelectedStore = pbStores[0].name;
+    setCookie("lge_pb_store", pbSelectedStore);
+
+    let pbPhotos = [];
+    let pbStatusText = "Chargement…";
+    let pbTrackKey = "";
+    let regieCatsKey = "";
+
+    function currentStore() {
+      return pbStores.find(s => s.name === pbSelectedStore) || pbStores[0];
+    }
+    function saveStoresCookie() {
+      setCookie("lge_pb_stores", JSON.stringify(pbStores));
+    }
+    function saveOptsCookie() {
+      setCookie("lge_pb_opts", JSON.stringify(pbOpts));
+    }
+    function preloadPhotos(list) {
+      for (const p of list) {
+        const img = new Image();
+        img.src = p.url || p.thumb;
+      }
+    }
+    async function loadPhotobooth(force = false) {
+      const store = currentStore();
+      if (!store || !store.url) {
+        pbPhotos = [];
+        pbStatusText = "Aucun lien Simple Booth configuré";
+        renderPhotoboothStrip(true);
+        return;
+      }
+      pbStatusText = "Actualisation…";
+      setText("pb-regie-status", `${store.name} : actualisation…`);
+      try {
+        const res = await fetch(`/api/photobooth?url=${encodeURIComponent(store.url)}&limit=50&order=${encodeURIComponent(pbOpts.order)}&force=${force ? 1 : 0}`);
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.detail || "Erreur chargement galerie");
+        pbPhotos = Array.isArray(data.photos) ? data.photos : [];
+        pbStatusText = pbPhotos.length ? `${pbPhotos.length} photo(s) · ${pbOpts.order === "asc" ? "Chronologique" : "Récentes d'abord"}` : "Aucune photo disponible";
+        setText("pb-regie-status", `${store.name} : ${pbPhotos.length} photo(s)`);
+        preloadPhotos(pbPhotos);
+      } catch (e) {
+        pbStatusText = "Impossible de charger le photobooth";
+        setText("pb-regie-status", `Erreur : ${e.message || e}`);
+      }
+      renderPhotoboothStrip(false);
+    }
 
     const joinUrl = () => `${window.location.origin}/?room=${roomCode}`;
 
@@ -139,20 +238,192 @@
         </footer>
       </div>
 
-      <button id="gear" title="Régie" class="fixed top-3 right-4 text-2xl opacity-30 hover:opacity-100 transition">⚙️</button>
-      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-col gap-2 w-64">
-        <div class="text-xs uppercase opacity-60 px-1">Régie</div>
-        <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-4 py-2 font-bold text-left">⏭️ Étape suivante</button>
-        <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-4 py-2 font-bold text-left">⚡ Vitesse : 1x</button>
-        <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-4 py-2 font-bold text-left">🗳️ Vote catégories : OFF</button>
-        <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-4 py-2 font-bold text-left">📱 Ouvrir vue Mobile</button>
+      <button id="gear" title="Régie" class="fixed top-3 right-4 text-2xl opacity-30 hover:opacity-100 transition z-50">⚙️</button>
+      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/15 rounded-2xl p-4 shadow-2xl flex flex-col gap-3 w-96 max-h-[85vh] overflow-y-auto">
+        <div class="flex items-center justify-between">
+          <div class="text-xs uppercase tracking-wider opacity-60 font-bold">Régie</div>
+          <button id="regie-close" class="text-sm opacity-60 hover:opacity-100 px-1">✕</button>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 py-2 text-sm font-bold text-left">⏭️ Étape suivante</button>
+          <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-3 py-2 text-sm font-bold text-left">⚡ Vitesse : 1x</button>
+          <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-3 py-2 text-sm font-bold text-left">🗳️ Vote : OFF</button>
+          <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 text-sm font-bold text-left">📱 Vue Mobile</button>
+        </div>
+        <div class="border-t border-white/10 pt-3">
+          <div class="flex items-center justify-between text-xs uppercase tracking-wider opacity-75 mb-2">
+            <span>Catégorie du quiz (15 questions)</span>
+            <span id="regie-vote-hint" class="text-indigo-300 font-bold"></span>
+          </div>
+          <div id="regie-cats" class="flex flex-col gap-1.5"></div>
+        </div>
+        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📸 Photobooth (Cookie local)</span>
+            <button id="pb-refresh" title="Rafraîchir les photos" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-2 py-1">🔄 Actualiser</button>
+          </div>
+          <select id="pb-store-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-sm font-bold text-white outline-none"></select>
+          <div class="grid grid-cols-2 gap-2">
+            <select id="pb-speed-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
+              <option value="2">Vitesse : Rapide (2s/photo)</option>
+              <option value="4">Vitesse : Normale (4s/photo)</option>
+              <option value="6">Vitesse : Douce (6s/photo)</option>
+              <option value="10">Vitesse : Lente (10s/photo)</option>
+            </select>
+            <select id="pb-order-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
+              <option value="asc">Ordre : Chronologique</option>
+              <option value="desc">Ordre : Récentes d'abord</option>
+            </select>
+          </div>
+          <div id="pb-regie-status" class="text-[11px] opacity-70"></div>
+          <button id="btn-pb-manage" class="text-xs bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2 font-bold text-left">🔗 Gérer les 7 magasins / Ajouter un lieu</button>
+          <div id="pb-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
+            <div id="pb-stores-editor" class="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1"></div>
+            <div class="border-t border-white/10 pt-2 flex flex-col gap-1.5">
+              <div class="text-[11px] uppercase opacity-70 font-bold">Ajouter un magasin</div>
+              <input id="pb-new-name" placeholder="Nom du magasin" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+              <input id="pb-new-url" placeholder="https://www.simplebooth.com/gallery/..." class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+              <div class="flex gap-2">
+                <button id="pb-add-store" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">➕ Ajouter</button>
+                <button id="pb-save-stores" class="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded-lg py-1.5 text-xs font-bold">💾 Enregistrer</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>`;
 
+    $("regie").onclick = (e) => e.stopPropagation();
     $("gear").onclick = (e) => { e.stopPropagation(); $("regie").classList.toggle("hidden"); };
+    $("regie-close").onclick = () => $("regie").classList.add("hidden");
     $("btn-next").onclick = () => send("NEXT");
     $("btn-speed").onclick = () => send("TOGGLE_SPEED");
     $("btn-vote").onclick = () => send("TOGGLE_VOTE");
     $("btn-mobile").onclick = () => { if (roomCode) window.open(joinUrl(), "_blank"); };
+    $("btn-pb-manage").onclick = () => {
+      const panel = $("pb-manage-panel");
+      panel.classList.toggle("hidden");
+      if (!panel.classList.contains("hidden")) renderStoresEditor();
+    };
+    $("pb-refresh").onclick = () => loadPhotobooth(true);
+
+    function syncStoreSelect() {
+      const sel = $("pb-store-select");
+      if (!sel) return;
+      sel.innerHTML = pbStores.map(s => `<option value="${esc(s.name)}" ${s.name === pbSelectedStore ? "selected" : ""}>${esc(s.name)}</option>`).join("");
+      $("pb-speed-select").value = String(pbOpts.speedSec);
+      $("pb-order-select").value = pbOpts.order;
+    }
+    function renderStoresEditor() {
+      const box = $("pb-stores-editor");
+      if (!box) return;
+      box.innerHTML = pbStores.map((s, idx) => `
+        <div class="bg-white/5 rounded-lg p-2 flex flex-col gap-1">
+          <div class="flex items-center gap-1">
+            <input data-idx="${idx}" data-field="name" value="${esc(s.name)}" class="pb-edit-input flex-1 rounded bg-slate-800 border border-white/10 px-2 py-1 text-xs font-bold text-white outline-none" />
+            ${pbStores.length > 1 ? `<button data-del="${idx}" title="Supprimer" class="pb-del-btn text-xs px-1.5 py-1 rounded bg-rose-600/70 hover:bg-rose-600">🗑️</button>` : ""}
+          </div>
+          <input data-idx="${idx}" data-field="url" value="${esc(s.url)}" class="pb-edit-input w-full rounded bg-slate-800 border border-white/10 px-2 py-1 text-[11px] text-amber-200 outline-none" />
+        </div>`).join("");
+      box.querySelectorAll(".pb-del-btn").forEach(btn => {
+        btn.onclick = () => {
+          const idx = Number(btn.dataset.del);
+          pbStores.splice(idx, 1);
+          if (!pbStores.some(x => x.name === pbSelectedStore)) {
+            pbSelectedStore = pbStores[0].name;
+            setCookie("lge_pb_store", pbSelectedStore);
+          }
+          saveStoresCookie();
+          syncStoreSelect();
+          renderStoresEditor();
+          pbTrackKey = "";
+          loadPhotobooth(true);
+        };
+      });
+    }
+    $("pb-store-select").onchange = (e) => {
+      pbSelectedStore = e.target.value;
+      setCookie("lge_pb_store", pbSelectedStore);
+      pbTrackKey = "";
+      loadPhotobooth(false);
+    };
+    $("pb-speed-select").onchange = (e) => {
+      pbOpts.speedSec = Number(e.target.value) || 4;
+      saveOptsCookie();
+      pbTrackKey = "";
+      renderPhotoboothStrip(true);
+    };
+    $("pb-order-select").onchange = (e) => {
+      pbOpts.order = e.target.value === "desc" ? "desc" : "asc";
+      saveOptsCookie();
+      pbTrackKey = "";
+      loadPhotobooth(false);
+    };
+    $("pb-add-store").onclick = () => {
+      const name = $("pb-new-name").value.trim();
+      const url = $("pb-new-url").value.trim();
+      if (!name || !url) return;
+      pbStores.push({ name, url });
+      pbSelectedStore = name;
+      setCookie("lge_pb_store", pbSelectedStore);
+      saveStoresCookie();
+      $("pb-new-name").value = "";
+      $("pb-new-url").value = "";
+      syncStoreSelect();
+      renderStoresEditor();
+      pbTrackKey = "";
+      loadPhotobooth(true);
+    };
+    $("pb-save-stores").onclick = () => {
+      document.querySelectorAll(".pb-edit-input").forEach(inp => {
+        const idx = Number(inp.dataset.idx);
+        const field = inp.dataset.field;
+        if (pbStores[idx]) pbStores[idx][field] = inp.value.trim();
+      });
+      pbStores = pbStores.filter(s => s.name && s.url);
+      if (!pbStores.length) pbStores = DEFAULT_STORES.map(s => ({ ...s }));
+      if (!pbStores.some(s => s.name === pbSelectedStore)) {
+        pbSelectedStore = pbStores[0].name;
+        setCookie("lge_pb_store", pbSelectedStore);
+      }
+      saveStoresCookie();
+      syncStoreSelect();
+      renderStoresEditor();
+      pbTrackKey = "";
+      loadPhotobooth(true);
+    };
+
+    function renderPhotoboothStrip(forceRebuild) {
+      const strip = $("pb-strip");
+      const store = currentStore();
+      setText("pb-store-label", store ? store.name : "");
+      setText("pb-count-label", pbStatusText);
+      if (!strip) return;
+      if (!pbPhotos.length) {
+        pbTrackKey = "";
+        strip.innerHTML = `<div class="w-full text-center text-sm opacity-60 pulse-soft">${esc(pbStatusText)}</div>`;
+        return;
+      }
+      const key = `${store ? store.name : ""}|${pbOpts.speedSec}|${pbOpts.order}|${pbPhotos.map(p => p.code).join(",")}`;
+      if (!forceRebuild && key === pbTrackKey && $("pb-track")) return;
+      pbTrackKey = key;
+      const block = [];
+      while (block.length < Math.max(pbPhotos.length, 10)) block.push(...pbPhotos);
+      const loopItems = [...block, ...block];
+      const duration = Math.max(20, block.length * pbOpts.speedSec);
+      strip.innerHTML = `
+        <div id="pb-track" class="pb-marquee-track px-4" style="--pb-duration: ${duration}s">
+          ${loopItems.map(p => `
+            <div class="shrink-0 h-40 xl:h-48 rounded-2xl overflow-hidden bg-slate-900 border border-white/15 shadow-xl">
+              <img src="${esc(p.url || p.thumb)}" alt="Photobooth" loading="eager"
+                   onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${esc(p.thumb)}';}"
+                   class="h-full w-auto object-contain" />
+            </div>`).join("")}
+        </div>`;
+    }
+
+    syncStoreSelect();
+    loadPhotobooth(false);
+    setInterval(() => loadPhotobooth(false), 180000);
     updateWakeBadge();
     requestWakeLock();
 
@@ -215,49 +486,45 @@
       const cats = s.categories || [];
       if (s.phase === "LOBBY") {
         main.innerHTML = `
-          <div class="h-full grid lg:grid-cols-2 gap-10 px-10 py-4 items-center">
-            <div class="flex flex-col items-center text-center pop">
-              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-14 w-auto object-contain mb-3" />
-              <h2 class="text-4xl font-extrabold">Scannez pour jouer !</h2>
-              <div class="mt-2 flex flex-wrap justify-center gap-2">
-                <div class="inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-full px-5 py-1.5 text-lg font-bold text-amber-200">
-                  <span>Thème :</span>
-                  <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
+          <div class="h-full flex flex-col justify-between gap-2">
+            <div class="flex-1 min-h-0 grid lg:grid-cols-2 gap-8 px-10 py-2 items-center">
+              <div class="flex flex-col items-center text-center pop">
+                <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain mb-1.5" />
+                <h2 class="text-3xl font-extrabold">Scannez pour jouer !</h2>
+                <div class="mt-2 flex flex-wrap justify-center gap-2">
+                  <div class="inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-full px-4 py-1 text-base font-bold text-amber-200">
+                    <span>Thème :</span>
+                    <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
+                  </div>
+                  <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3.5 py-1 text-sm font-bold"></div>
                 </div>
-                <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-4 py-1.5 text-sm font-bold"></div>
+                <div class="bg-white p-4 rounded-3xl shadow-2xl mt-3 w-[min(260px,34vh)]"><div id="big-qr"></div></div>
+                <div class="mt-2 text-base opacity-80">ou rendez-vous sur <span class="font-mono text-amber-200">${esc(window.location.origin)}</span></div>
+                <div class="mt-0.5 text-lg">Code de la salle</div>
+                <div class="text-5xl xl:text-6xl font-black tracking-[0.28em] text-amber-300 drop-shadow">${esc(s.room)}</div>
               </div>
-              <div class="bg-white p-5 rounded-3xl shadow-2xl mt-4 w-[min(340px,50vh)]"><div id="big-qr"></div></div>
-              <div class="mt-4 text-lg opacity-80">ou rendez-vous sur <span class="font-mono text-amber-200">${esc(window.location.origin)}</span></div>
-              <div class="mt-1 text-xl">Code de la salle</div>
-              <div class="text-7xl font-black tracking-[0.3em] text-amber-300 drop-shadow">${esc(s.room)}</div>
+              <div class="flex flex-col h-full min-h-0 py-2 gap-3">
+                <div class="flex items-center justify-between bg-white/10 border border-white/10 rounded-2xl px-5 py-3 shrink-0">
+                  <h2 class="text-3xl font-bold">Joueurs <span id="player-count" class="text-amber-300"></span></h2>
+                  <div class="text-right flex items-baseline gap-3">
+                    <span class="text-sm uppercase opacity-70">Début dans</span>
+                    <div id="timer" class="text-5xl font-black font-mono text-amber-300"></div>
+                  </div>
+                </div>
+                <div id="player-list" class="grid grid-cols-2 xl:grid-cols-3 gap-2.5 overflow-y-auto content-start flex-1 min-h-0"></div>
+              </div>
             </div>
-            <div class="flex flex-col h-full min-h-0 py-2 gap-4">
-              <div>
-                <div class="flex items-center justify-between text-xs uppercase tracking-wider opacity-75 mb-2">
-                  <span>Catégorie du quiz (15 questions)</span>
-                  <span id="lobby-vote-hint" class="text-indigo-200 font-bold"></span>
-                </div>
-                <div id="lobby-cats" class="flex flex-wrap gap-2">
-                  ${cats.map(cat => `
-                    <button data-cat="${esc(cat)}" class="cat-btn rounded-xl px-3.5 py-2 text-sm font-bold transition bg-white/10 hover:bg-white/20 flex items-center gap-2">
-                      <span>${catIcon(cat)} ${esc(cat)}</span>
-                      <span class="cat-meta text-xs"></span>
-                    </button>`).join("")}
-                </div>
+            <section class="h-48 xl:h-56 w-full bg-slate-950/70 border-t border-white/15 relative overflow-hidden flex items-center shrink-0">
+              <div class="absolute top-2 left-4 z-10 inline-flex items-center gap-2 bg-slate-950/85 border border-white/15 backdrop-blur px-3 py-1 rounded-full text-xs font-bold shadow">
+                <span>📸 Photobooth — <span id="pb-store-label" class="text-amber-300"></span></span>
+                <span class="opacity-50">·</span>
+                <span id="pb-count-label" class="opacity-80 font-normal"></span>
               </div>
-              <div class="flex items-end justify-between">
-                <h2 class="text-3xl font-bold">Joueurs <span id="player-count" class="text-amber-300"></span></h2>
-                <div class="text-right">
-                  <div class="text-sm uppercase opacity-70">Début dans</div>
-                  <div id="timer" class="text-6xl font-black font-mono"></div>
-                </div>
-              </div>
-              <div id="player-list" class="grid grid-cols-2 xl:grid-cols-3 gap-3 overflow-y-auto content-start flex-1"></div>
-            </div>
+              <div id="pb-strip" class="w-full h-full flex items-center overflow-hidden"></div>
+            </section>
           </div>`;
-        main.querySelectorAll(".cat-btn").forEach(btn => {
-          btn.onclick = () => send("SELECT_CATEGORY", { category: btn.dataset.cat });
-        });
+        pbTrackKey = "";
+        renderPhotoboothStrip(true);
         const box = $("big-qr");
         box.innerHTML = "";
         new QRCode(box, { text: joinUrl(), width: 512, height: 512, colorDark: "#1e1b4b", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
@@ -421,7 +688,7 @@
       setText("answered", `${s.answered_count} / ${s.players.filter(p => p.connected).length} réponse(s)`);
       setText("btn-speed", `⚡ Vitesse : ${s.speed}x`);
       $("speed-badge").classList.toggle("hidden", s.speed === 1);
-      setText("btn-vote", `🗳️ Vote catégories : ${voting ? "ON" : "OFF"}`);
+      setText("btn-vote", `🗳️ Vote : ${voting ? "ON" : "OFF"}`);
       $("vote-badge").classList.toggle("hidden", !voting);
 
       const diffBadge = $("diff-badge");
@@ -433,9 +700,24 @@
         diffBadge.className = `text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
       }
 
-      // Catégorie active & votes dans le lobby
+      // Catégories dans le menu Régie & badges du lobby
+      const cats = s.categories || [];
+      const regieCats = $("regie-cats");
+      const cKey = cats.join("|");
+      if (regieCats && cKey !== regieCatsKey) {
+        regieCatsKey = cKey;
+        regieCats.innerHTML = cats.map(cat => `
+          <button data-cat="${esc(cat)}" class="cat-btn rounded-xl px-3 py-2 text-xs font-bold transition bg-white/10 hover:bg-white/20 flex items-center justify-between gap-2 text-left">
+            <span>${catIcon(cat)} ${esc(cat)}</span>
+            <span class="cat-meta text-[11px]"></span>
+          </button>`).join("");
+        regieCats.querySelectorAll(".cat-btn").forEach(btn => {
+          btn.onclick = () => send("SELECT_CATEGORY", { category: btn.dataset.cat });
+        });
+      }
       setText("lobby-cat-name", `${catIcon(s.category)} ${s.category || ""}`);
-      setText("lobby-vote-hint", voting ? "🗳️ Vote joueurs actif" : "Sélection régie");
+      setText("regie-vote-hint", voting ? "🗳️ Vote joueurs actif" : "Sélection régie");
+      if (s.phase === "LOBBY") renderPhotoboothStrip(false);
       const lobbyDiff = $("lobby-diff-badge");
       if (lobbyDiff) {
         lobbyDiff.textContent = isBeg
@@ -451,7 +733,7 @@
         btn.disabled = voting && locked;
         btn.classList.toggle("bg-amber-400", active);
         btn.classList.toggle("text-slate-900", active);
-        btn.classList.toggle("ring-4", active);
+        btn.classList.toggle("ring-2", active);
         btn.classList.toggle("ring-amber-200", active);
         btn.classList.toggle("bg-white/10", !active);
         btn.classList.toggle("hover:bg-white/20", !active && !(voting && locked));

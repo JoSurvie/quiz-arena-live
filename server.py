@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import random
 import re
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -34,6 +38,18 @@ CODE_LENGTH = 5
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sans caractères ambigus (O/0, I/1)
 ROOM_TTL = 30 * 60  # suppression d'une salle vide après 30 minutes
 MAX_NAME_LENGTH = 16
+
+PHOTOBOOTH_CACHE_TTL = 90.0
+PHOTOBOOTH_CACHE: dict[tuple[str, int], tuple[float, list[dict[str, Any]]]] = {}
+DEFAULT_STORES: list[dict[str, str]] = [
+    {"name": "Sainte-Foy", "url": "https://www.simplebooth.com/gallery/3DTLTk68fwVM-lge-fev-2026"},
+    {"name": "Vanier", "url": "https://www.simplebooth.com/gallery/8KonRrq3avT5-lge-fev-26"},
+    {"name": "Brossard", "url": "https://www.simplebooth.com/gallery/urjGcth7fSdh-lge-2026"},
+    {"name": "Marché Central", "url": "https://www.simplebooth.com/gallery/3vaHgUNcJUos-lge-fev-2026"},
+    {"name": "Lévis", "url": "https://www.simplebooth.com/gallery/ahebLG4GWjZF-lge-fev-2026"},
+    {"name": "Sherbrooke", "url": "https://www.simplebooth.com/gallery/XCaTpPmn6r3h-lge-fev-2026"},
+    {"name": "Ste-Catherine", "url": "https://www.simplebooth.com/gallery/ALkJDisegsdU-lge-fev-2026"},
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -522,6 +538,142 @@ async def game_clock_loop(room: Room) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Photobooth Simple Booth (Proxy + Cache)
+# --------------------------------------------------------------------------- #
+def extract_gallery_code(url_or_code: str) -> str | None:
+    raw = (url_or_code or "").strip()
+    m = re.search(r"simplebooth\.com/gallery/([a-zA-Z0-9]+)", raw)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r"[a-zA-Z0-9]{6,24}", raw):
+        return raw
+    return None
+
+
+def _http_get_text(url: str, accept: str = "application/hal+json, application/json") -> str:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": accept,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _parse_created_at(val: Any) -> tuple[int, str]:
+    if isinstance(val, (int, float)):
+        ts_ms = int(val if val > 1e12 else val * 1000)
+        iso = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
+        return ts_ms, iso
+    if isinstance(val, str) and val.strip():
+        s = val.strip()
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000), s
+        except ValueError:
+            pass
+    return 0, ""
+
+
+def _normalize_upload(u: Any) -> dict[str, Any] | None:
+    if not isinstance(u, dict):
+        return None
+    if u.get("deleted") is True:
+        return None
+    if u.get("processed") is False:
+        return None
+    code = str(u.get("code") or "").strip()
+    if not code:
+        return None
+    media = u.get("media") if isinstance(u.get("media"), dict) else {}
+    original = str(media.get("original") or media.get("medium") or "").strip()
+    if not original:
+        return None
+    mime = str(u.get("mimeType") or "").lower()
+    if mime.startswith("video/") or original.lower().endswith((".mp4", ".webm", ".mov")):
+        return None
+    thumb = str(media.get("medium") or media.get("thumbnail") or original).strip()
+    ts_ms, created_iso = _parse_created_at(u.get("createdAt"))
+    return {
+        "code": code,
+        "url": original,
+        "thumb": thumb,
+        "createdAt": created_iso,
+        "ts": ts_ms,
+        "width": u.get("width"),
+        "height": u.get("height"),
+        "mimeType": mime or "image/jpeg",
+    }
+
+
+def _extract_window_simplebooth(html: str) -> list[dict[str, Any]]:
+    m = re.search(r"window\.simpleBooth\s*=\s*", html)
+    if not m:
+        return []
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(html[m.end() :])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(obj, dict):
+        return []
+    for candidate in (
+        obj.get("uploads"),
+        (obj.get("_embedded") or {}).get("uploads") if isinstance(obj.get("_embedded"), dict) else None,
+        (obj.get("gallery") or {}).get("uploads") if isinstance(obj.get("gallery"), dict) else None,
+    ):
+        if isinstance(candidate, list):
+            return candidate
+    return []
+
+
+def _fetch_simplebooth_sync(gallery_code: str, limit: int = 50) -> list[dict[str, Any]]:
+    photos_by_code: dict[str, dict[str, Any]] = {}
+    next_url: str | None = (
+        f"https://api.simplebooth.com/api/uploads?gallery={gallery_code}"
+        f"&order-by=created-at&order=desc&page-size={limit}"
+    )
+
+    pages = 0
+    while next_url and len(photos_by_code) < limit and pages < 4:
+        pages += 1
+        try:
+            raw = _http_get_text(next_url)
+            data = json.loads(raw)
+        except Exception:
+            break
+        uploads = ((data.get("_embedded") or {}).get("uploads") or []) if isinstance(data, dict) else []
+        for item in uploads:
+            norm = _normalize_upload(item)
+            if norm and norm["code"] not in photos_by_code:
+                photos_by_code[norm["code"]] = norm
+                if len(photos_by_code) >= limit:
+                    break
+        nxt = ((data.get("_links") or {}).get("next") or {}) if isinstance(data, dict) else {}
+        href = nxt.get("href") if isinstance(nxt, dict) else None
+        next_url = urljoin(next_url, href) if href else None
+
+    if not photos_by_code:
+        try:
+            html = _http_get_text(
+                f"https://www.simplebooth.com/gallery/{gallery_code}",
+                accept="text/html,application/xhtml+xml",
+            )
+            for item in _extract_window_simplebooth(html):
+                norm = _normalize_upload(item)
+                if norm and norm["code"] not in photos_by_code:
+                    photos_by_code[norm["code"]] = norm
+        except Exception:
+            pass
+
+    photos = sorted(photos_by_code.values(), key=lambda x: x["ts"], reverse=True)
+    return photos[:limit]
+
+
+# --------------------------------------------------------------------------- #
 # Application
 # --------------------------------------------------------------------------- #
 app = FastAPI(title="Laser Quiz")
@@ -536,6 +688,37 @@ async def index() -> FileResponse:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "rooms": len(rooms), "questions": len(QUESTIONS)}
+
+
+@app.get("/api/photobooth")
+async def api_photobooth(
+    url: str,
+    limit: int = 50,
+    order: str = "asc",
+    force: int = 0,
+) -> dict[str, Any]:
+    code = extract_gallery_code(url)
+    if not code:
+        raise HTTPException(status_code=400, detail="Lien de galerie Simple Booth invalide.")
+    capped = max(1, min(limit, 50))
+    now = time.monotonic()
+    key = (code, capped)
+    cached = PHOTOBOOTH_CACHE.get(key)
+    if not force and cached and (now - cached[0]) < PHOTOBOOTH_CACHE_TTL:
+        photos = list(cached[1])
+    else:
+        photos = await asyncio.to_thread(_fetch_simplebooth_sync, code, capped)
+        if photos:
+            PHOTOBOOTH_CACHE[key] = (now, list(photos))
+    sort_order = "desc" if str(order).lower() == "desc" else "asc"
+    ordered = sorted(photos, key=lambda x: x["ts"], reverse=(sort_order == "desc"))
+    return {
+        "ok": True,
+        "galleryCode": code,
+        "count": len(ordered),
+        "order": sort_order,
+        "photos": ordered,
+    }
 
 
 @app.websocket("/ws/tv")
