@@ -280,7 +280,7 @@
 
     // --- Structure ---------------------------------------------------------
     app.innerHTML = `
-      <div class="h-[100dvh] flex flex-col overflow-hidden">
+      <div class="h-full flex flex-col overflow-hidden">
         <header class="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-2 sm:py-3 pr-14 sm:pr-20 shrink-0">
           <div class="flex flex-wrap items-center gap-2 sm:gap-3">
             <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-8 sm:h-11 w-auto object-contain" />
@@ -749,9 +749,9 @@
       const loopItems = [...block, ...block];
       const duration = Math.max(18, block.length * pbOpts.speedSec);
       strip.innerHTML = `
-        <div id="pb-track" class="pb-marquee-track px-4" style="--pb-duration: ${duration}s">
+        <div id="pb-track" class="pb-marquee-track h-full py-2 px-4" style="--pb-duration: ${duration}s">
           ${loopItems.map(p => `
-            <div class="shrink-0 h-32 sm:h-40 xl:h-48 rounded-2xl overflow-hidden bg-slate-900 border border-white/15 shadow-xl">
+            <div class="shrink-0 h-full rounded-2xl overflow-hidden bg-slate-900 border border-white/15 shadow-xl">
               <img src="${esc(p.thumb || p.url)}" alt="Photobooth" decoding="async"
                    onerror="if(this.dataset.fb!=='1'){this.dataset.fb='1';this.src='${esc(p.url)}';}"
                    class="h-full w-auto object-contain" />
@@ -1105,34 +1105,33 @@
       lastDiffKey = "";
       if (s.phase === "LOBBY") {
         main.innerHTML = `
-          <div class="min-h-full flex flex-col justify-between gap-2">
-            <div class="flex-1 min-h-0 grid md:grid-cols-2 gap-4 lg:gap-8 px-4 sm:px-8 lg:px-10 py-2 items-center">
-              <div class="flex flex-col items-center text-center pop">
-                <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-10 sm:h-12 w-auto object-contain mb-1" />
-                <h2 class="text-2xl sm:text-3xl font-extrabold">Scannez pour jouer !</h2>
-                <div class="mt-2 flex flex-wrap justify-center gap-2">
-                  <div class="inline-flex items-center gap-2 bg-amber-400/20 border border-amber-300/40 rounded-full px-3 sm:px-4 py-1 text-sm sm:text-base font-bold text-amber-200">
+          <div class="h-full flex flex-col justify-between overflow-hidden">
+            <div class="flex-1 min-h-0 grid md:grid-cols-2 gap-3 lg:gap-8 px-4 sm:px-8 lg:px-10 py-1 sm:py-2 items-center overflow-hidden">
+              <div class="flex flex-col items-center justify-center text-center pop min-h-0">
+                <h2 class="text-xl sm:text-2xl xl:text-3xl font-extrabold leading-tight">Scannez pour jouer !</h2>
+                <div class="mt-1 sm:mt-2 flex flex-wrap justify-center gap-1.5 sm:gap-2">
+                  <div class="inline-flex items-center gap-1.5 bg-amber-400/20 border border-amber-300/40 rounded-full px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-bold text-amber-200">
                     <span>Thème :</span>
                     <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
                   </div>
-                  <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-1 text-xs sm:text-sm font-bold"></div>
+                  <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-bold"></div>
                 </div>
-                <div class="bg-white p-3 sm:p-4 rounded-3xl shadow-2xl mt-2 sm:mt-3 w-[min(250px,30vh,42vw)]"><div id="big-qr"></div></div>
-                <div class="mt-1.5 sm:mt-2 text-base sm:text-lg">Code de la salle</div>
-                <div class="text-4xl sm:text-5xl xl:text-6xl font-black tracking-[0.24em] sm:tracking-[0.28em] text-amber-300 drop-shadow">${esc(s.room)}</div>
+                <div class="bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-2xl mt-2 w-[clamp(110px,24vh,230px)]"><div id="big-qr"></div></div>
+                <div class="mt-1 text-xs sm:text-base opacity-85">Code de la salle</div>
+                <div class="text-3xl sm:text-4xl xl:text-5xl font-black tracking-[0.24em] text-amber-300 drop-shadow leading-none">${esc(s.room)}</div>
               </div>
-              <div class="flex flex-col h-full min-h-[14rem] py-1 sm:py-2 gap-2.5 sm:gap-3">
-                <div class="flex flex-wrap items-center justify-between gap-2 bg-white/10 border border-white/10 rounded-2xl px-4 sm:px-5 py-2.5 sm:py-3 shrink-0">
-                  <h2 class="text-2xl sm:text-3xl font-bold">Joueurs <span id="player-count" class="text-amber-300"></span></h2>
+              <div class="flex flex-col h-full min-h-0 py-1 sm:py-2 gap-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 bg-white/10 border border-white/10 rounded-2xl px-4 sm:px-5 py-2 sm:py-3 shrink-0">
+                  <h2 class="text-xl sm:text-3xl font-bold">Joueurs <span id="player-count" class="text-amber-300"></span></h2>
                   <div class="text-right flex items-baseline gap-2 sm:gap-3">
                     <span class="text-xs sm:text-sm uppercase opacity-70">Début dans</span>
                     <div id="timer" class="text-3xl sm:text-5xl font-black font-mono text-amber-300"></div>
                   </div>
                 </div>
-                <div id="player-list" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 sm:gap-2.5 overflow-y-auto content-start flex-1 min-h-0"></div>
+                <div id="player-list" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 overflow-y-auto content-start flex-1 min-h-0"></div>
               </div>
             </div>
-            <section id="pb-section" class="${pbOpts.enabled ? "" : "hidden"} h-36 sm:h-44 xl:h-52 w-full bg-slate-950/70 border-t border-white/15 relative overflow-hidden flex items-center shrink-0">
+            <section id="pb-section" class="${pbOpts.enabled ? "" : "hidden"} h-[clamp(96px,22vh,200px)] w-full bg-slate-950/70 border-t border-white/15 relative overflow-hidden flex items-center shrink-0">
               <div id="pb-strip" class="w-full h-full flex items-center overflow-hidden"></div>
             </section>
           </div>`;
