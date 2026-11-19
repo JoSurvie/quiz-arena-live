@@ -1679,6 +1679,140 @@ async def api_auth_page_lock(body: dict[str, Any] = Body(...)) -> dict[str, Any]
     }
 
 
+AUTH_PAIR_TTL = 600.0
+AUTH_PAIR_SESSIONS: dict[str, dict[str, Any]] = {}
+
+
+def _cleanup_pair_sessions() -> None:
+    now = time.monotonic()
+    for code, sess in list(AUTH_PAIR_SESSIONS.items()):
+        if (now - float(sess.get("created_at", 0.0))) >= AUTH_PAIR_TTL:
+            AUTH_PAIR_SESSIONS.pop(code, None)
+
+
+@app.post("/api/auth/pair-create")
+async def api_auth_pair_create(body: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    _cleanup_pair_sessions()
+    target = "regie" if str(body.get("target") or "").strip().lower() == "regie" else "page"
+    room_code = normalize_code(str(body.get("room") or ""))
+    if len(room_code) != CODE_LENGTH:
+        room_code = generate_code()
+    if room_code not in rooms:
+        rooms[room_code] = Room(room_code)
+
+    while True:
+        pair_code = "".join(SYS_RNG.choices(CODE_ALPHABET, k=8))
+        if pair_code not in AUTH_PAIR_SESSIONS:
+            break
+
+    AUTH_PAIR_SESSIONS[pair_code] = {
+        "code": pair_code,
+        "target": target,
+        "room": room_code,
+        "created_at": time.monotonic(),
+        "approved": False,
+        "username": "",
+        "role": "",
+        "token": "",
+    }
+    return {
+        "ok": True,
+        "pair_code": pair_code,
+        "target": target,
+        "room": room_code,
+    }
+
+
+@app.get("/api/auth/pair-status")
+async def api_auth_pair_status(code: str = "", consume: int = 0) -> dict[str, Any]:
+    _cleanup_pair_sessions()
+    clean_code = code.strip().upper()
+    sess = AUTH_PAIR_SESSIONS.get(clean_code)
+    if sess is None:
+        return {"ok": False, "expired": True}
+    if not sess["approved"]:
+        return {
+            "ok": True,
+            "approved": False,
+            "target": sess["target"],
+            "room": sess["room"],
+        }
+    res = {
+        "ok": True,
+        "approved": True,
+        "target": sess["target"],
+        "room": sess["room"],
+        "username": sess["username"],
+        "role": sess["role"],
+        "token": sess["token"] if consume else "",
+    }
+    if consume == 1:
+        AUTH_PAIR_SESSIONS.pop(clean_code, None)
+    return res
+
+
+@app.post("/api/auth/pair-login")
+async def api_auth_pair_login(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    _cleanup_pair_sessions()
+    pair_code = str(body.get("pair_code") or "").strip().upper()
+    username = str(body.get("username") or "").strip()
+    password = str(body.get("password") or "")
+    new_password = str(body.get("new_password") or "")
+
+    sess = AUTH_PAIR_SESSIONS.get(pair_code)
+    if sess is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Ce QR code a expiré. Rafraîchissez le QR code sur la TV.",
+        )
+
+    user = _find_user(username)
+    if user is None or not hmac.compare_digest(
+        str(user.get("password_hash") or ""),
+        _hash_password(password, str(user.get("salt") or "")),
+    ):
+        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect.")
+
+    if sess["target"] == "regie" and user["username"] != "AdminLGE":
+        raise HTTPException(status_code=403, detail="Seul AdminLGE peut accéder à la régie.")
+
+    if user.get("must_change_password"):
+        if not new_password:
+            return {
+                "ok": True,
+                "must_change_password": True,
+                "username": user["username"],
+                "role": user["role"],
+            }
+        if len(new_password.strip()) < 4:
+            raise HTTPException(
+                status_code=400,
+                detail="Le nouveau mot de passe doit contenir au moins 4 caractères.",
+            )
+        new_salt = secrets.token_hex(16)
+        user["salt"] = new_salt
+        user["password_hash"] = _hash_password(new_password, new_salt)
+        user["must_change_password"] = False
+        _save_auth_state(AUTH_STATE)
+
+    token = _make_auth_token(user["username"], user["role"], purpose="session")
+    sess["approved"] = True
+    sess["username"] = user["username"]
+    sess["role"] = user["role"]
+    sess["token"] = token
+
+    return {
+        "ok": True,
+        "must_change_password": False,
+        "approved": True,
+        "username": user["username"],
+        "role": user["role"],
+        "token": token,
+        "room": sess["room"],
+        "target": sess["target"],
+    }
+
+
 @app.websocket("/ws/tv")
 async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
     await websocket.accept()

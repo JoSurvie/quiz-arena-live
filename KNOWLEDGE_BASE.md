@@ -12,14 +12,14 @@
 | Fichier | Rôle principal | Détails clés |
 | --- | --- | --- |
 | [server.py](server.py) | Serveur FastAPI, boucle d'horloge, WebSockets, proxy Simple Booth & push Google Sheets | Titre `FastAPI(title="Laser Quiz")`, gestion des salles (`Room`), joueurs (`Player`), tirage non répétitif, gamification, nettoyage AFK/déconnexion, cache photobooth et suivi KPI fin de partie |
-| [static/index.html](static/index.html) | Interface SPA unique (mode TV et mode Mobile) | Routage automatique par URL (`?room=XXXXX` -> `initPlayer()`, sinon `initTV()`). Stack CDN : Tailwind CSS (`https://cdn.tailwindcss.com`), QRCode.js (`1.0.0`), `canvas-confetti` (`1.9.3`) |
+| [static/index.html](static/index.html) | Interface SPA unique (TV, Mobile Joueur & Régie Staff) | Routage automatique par URL (`?tv_auth=...` -> `initStaffAuth()`, `?room=XXXXX` -> `initPlayer()`, sinon `initTV()`). Stack CDN : Tailwind CSS (`https://cdn.tailwindcss.com`), QRCode.js (`1.0.0`), `canvas-confetti` (`1.9.3`) |
 | [questions.json](questions.json) | Banque de questions structurée | **300 questions uniques** : 5 catégories de base × 2 niveaux (`standard` et `debutant`) × 30 questions |
 | [google_sheets_webhook.gs](google_sheets_webhook.gs) | Script Google Apps Script (Webhook Drive) | À coller dans *Extensions → Apps Script* du Google Sheet cible (`1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI`) pour recevoir et mettre à jour les 6 colonnes KPI automatiquement |
 | [requirements.txt](requirements.txt) | Dépendances Python | `fastapi==0.115.0`, `uvicorn[standard]==0.30.6`, `websockets==13.1` |
 | [.gitignore](.gitignore) | Exclusions Git | `__pycache__/`, `*.py[cod]`, `.venv/`, `venv/`, `.env`, `.DS_Store` |
 
 ### Routage d'interface & Branding
-- **Détection du mode** dans [static/index.html](static/index.html) : la présence du paramètre query `?room=XXXXX` lance `initPlayer()` (interface mobile) ; son absence lance `initTV()` (écran TV + régie).
+- **Détection du mode** dans [static/index.html](static/index.html) : `?tv_auth=CODE` lance `initStaffAuth()` (connexion/régie staff sur cellulaire), `?room=XXXXX` lance `initPlayer()` (interface joueur mobile), sinon `initTV()` (écran TV + régie).
 - **Codes de salle** : `CODE_LENGTH = 5` caractères tirés depuis `CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"` (exclusion des caractères ambigus `I`, `O`, `0`, `1`).
 - **Durée de vie d'une salle vide** : `ROOM_TTL = 30 * 60` secondes (1800 s / 30 min, suivi via `Room.empty_since`).
 - **Logo Laser Game Evolution** : PNG transparent officiel affiché sans cadre blanc (`https://lasergame-evolution.ca/wp-content/uploads/2025/01/CANADA-vector-logo-color-bl-black-copie-01.png`).
@@ -51,6 +51,7 @@ L'état d'une partie est piloté côté serveur par `Room.game_clock_loop()`, `R
   - Afficher un aperçu mobile de test
   - Masquer/afficher et configurer le Photobooth (`#btn-pb-toggle` + cookies locaux)
   - Expulser manuellement un joueur (`KICK_PLAYER` via bouton `✕`)
+  - **Défilement manuel sur Smart TV (`#regie-body`)** : boutons `⬆️ / ⬇️` en haut (`#regie-up-top`, `#regie-down-top`) et barre fixe `⬆️ Monter / ⬇️ Descendre` en bas (`#regie-up-bot`, `#regie-down-bot`), plus navigation clavier/télécommande (`ArrowUp`, `ArrowDown`, `PageUp`, `PageDown`) sans conteneurs imbriqués
 
 ---
 
@@ -245,6 +246,10 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 - **Option de blocage de page en Régie (`#btn-page-lock`)** :
   - Activée par défaut (`page_lock_enabled = True`).
   - Basculable en direct depuis la Régie (`TOGGLE_PAGE_LOCK` ou `POST /api/auth/page-lock`) pour imposer ou désactiver le déblocage par `LGE` au chargement de la page TV.
+- **Déblocage & Régie Mobile par QR Code (`/?tv_auth=CODE&target=page|regie`, réservé au staff)** :
+  - Affiché uniquement sur `#page-lock-overlay` (`#lock-qr`), `#admin-login-box` (`#admin-qr`) et `#regie` (`#btn-mobile-regie-qr` → `#regie-inline-qr`), jamais pour les joueurs (`?room=XXXXX`).
+  - L'employé scanne le QR code sur son cellulaire (`initStaffAuth()`), saisit et valide obligatoirement son mot de passe (`POST /api/auth/pair-login`, avec changement imposé à la 1ʳᵉ connexion `AdminLGE`).
+  - La TV consomme le jeton via polling (`GET /api/auth/pair-status?consume=1`, TTL 10 min) pour se débloquer automatiquement. Si connecté en `AdminLGE`, le cellulaire bascule sur une interface complète **⚙️ Régie Mobile** connectée à `/ws/tv?room=XXXXX`.
 
 ---
 
@@ -263,6 +268,9 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 - `POST /api/auth/login` — Authentifie `LGE` ou `AdminLGE` (retourne `token` permanent ou `change_token` si `must_change_password`)
 - `POST /api/auth/change-password` — Valide le changement de mot de passe (1ʳᵉ connexion ou gestion admin)
 - `POST /api/auth/page-lock` — Active/désactive `page_lock_enabled` (réservé à `AdminLGE`)
+- `POST /api/auth/pair-create` — Crée une session QR temporaire (`AUTH_PAIR_TTL = 600 s`) liée à la salle
+- `GET /api/auth/pair-status?code=...&consume=0|1` — Polling TV de validation QR (consomme le code à `consume=1`)
+- `POST /api/auth/pair-login` — Valide identifiant + mot de passe depuis le cellulaire pour approuver la session QR (et ouvrir la Régie Mobile pour `AdminLGE`)
 
 ### WebSocket TV : `/ws/tv?room=XXXXX`
 - **Serveur → TV** :

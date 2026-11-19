@@ -15,7 +15,9 @@
       font-family: ui-rounded, "Segoe UI", system-ui, -apple-system, sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
-    #big-qr img, #big-qr canvas, #mini-qr img, #mini-qr canvas { width: 100%; height: auto; display: block; }
+    #big-qr img, #big-qr canvas, #mini-qr img, #mini-qr canvas,
+    #lock-qr img, #lock-qr canvas, #admin-qr img, #admin-qr canvas,
+    #regie-inline-qr img, #regie-inline-qr canvas { width: 100%; height: auto; display: block; }
     .pop { animation: pop .35s ease-out; }
     @keyframes pop { from { transform: scale(.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
     .pulse-soft { animation: pulseSoft 2s ease-in-out infinite; }
@@ -130,6 +132,7 @@
   const app = document.getElementById("app");
   const params = new URLSearchParams(window.location.search);
   const ROOM_PARAM = (params.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
+  const TV_AUTH_PARAM = (params.get("tv_auth") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const WS_BASE = (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
 
   function esc(s) {
@@ -148,7 +151,7 @@
     if (el.textContent !== next) el.textContent = next;
   }
 
-  if (params.has("room")) initPlayer(); else initTV();
+  if (TV_AUTH_PARAM) initStaffAuth(); else if (params.has("room")) initPlayer(); else initTV();
 
   /* ======================================================================
    *  MODE TV
@@ -302,108 +305,131 @@
       </div>
 
       <button id="gear" title="Régie" class="fixed top-3 right-4 text-2xl opacity-30 hover:opacity-100 transition z-50">⚙️</button>
-      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/15 rounded-2xl p-4 shadow-2xl flex flex-col gap-3 w-96 max-h-[85vh] overflow-y-auto">
-        <div class="flex items-center justify-between">
+      <div id="regie" class="hidden fixed top-14 right-4 z-50 bg-slate-900/95 border border-white/15 rounded-2xl shadow-2xl flex flex-col w-96 max-h-[85vh] overflow-hidden">
+        <div class="shrink-0 flex items-center justify-between px-4 py-3 border-b border-white/10">
           <div class="text-xs uppercase tracking-wider opacity-60 font-bold">Régie</div>
-          <button id="regie-close" class="text-sm opacity-60 hover:opacity-100 px-1">✕</button>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 py-2 text-sm font-bold text-left">⏭️ Étape suivante</button>
-          <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-3 py-2 text-sm font-bold text-left">⚡ Vitesse : 1x</button>
-          <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-3 py-2 text-sm font-bold text-left">🗳️ Vote : OFF</button>
-          <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 text-sm font-bold text-left">📱 Vue Mobile</button>
-        </div>
-        <div class="border-t border-white/10 pt-3">
-          <div class="flex items-center justify-between text-xs uppercase tracking-wider opacity-75 mb-2">
-            <span>Catégorie du quiz (15 questions)</span>
-            <span id="regie-vote-hint" class="text-indigo-300 font-bold"></span>
+          <div class="flex items-center gap-1.5">
+            <button id="regie-up-top" title="Monter" class="bg-white/10 hover:bg-white/20 active:scale-95 rounded-lg px-2 py-1 text-xs font-bold">⬆️</button>
+            <button id="regie-down-top" title="Descendre" class="bg-white/10 hover:bg-white/20 active:scale-95 rounded-lg px-2 py-1 text-xs font-bold">⬇️</button>
+            <button id="regie-close" class="text-sm opacity-60 hover:opacity-100 px-1.5 py-0.5">✕</button>
           </div>
-          <div id="regie-cats" class="flex flex-col gap-1.5"></div>
         </div>
-        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📸 Photobooth (Cookie local)</span>
-            <button id="pb-refresh" title="Rafraîchir les photos" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-2 py-1">🔄 Actualiser</button>
-          </div>
-          <button id="btn-pb-toggle" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition bg-emerald-600/80 hover:bg-emerald-600">👁️ Photobooth : Affiché</button>
-          <select id="pb-store-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-sm font-bold text-white outline-none"></select>
+        <div id="regie-body" class="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
           <div class="grid grid-cols-2 gap-2">
-            <select id="pb-speed-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
-              <option value="2">Vitesse : Rapide (2s/photo)</option>
-              <option value="4">Vitesse : Normale (4s/photo)</option>
-              <option value="6">Vitesse : Douce (6s/photo)</option>
-              <option value="10">Vitesse : Lente (10s/photo)</option>
-            </select>
-            <select id="pb-order-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
-              <option value="asc">Ordre : Chronologique</option>
-              <option value="desc">Ordre : Récentes d'abord</option>
-            </select>
+            <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 py-2 text-sm font-bold text-left">⏭️ Étape suivante</button>
+            <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-3 py-2 text-sm font-bold text-left">⚡ Vitesse : 1x</button>
+            <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-3 py-2 text-sm font-bold text-left">🗳️ Vote : OFF</button>
+            <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 text-sm font-bold text-left">📱 Vue Mobile</button>
           </div>
-          <div id="pb-regie-status" class="text-[11px] opacity-70"></div>
-          <button id="btn-pb-manage" class="text-xs bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2 font-bold text-left">🔗 Gérer les 7 magasins / Ajouter un lieu</button>
-          <div id="pb-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
-            <div id="pb-stores-editor" class="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1"></div>
-            <div class="border-t border-white/10 pt-2 flex flex-col gap-1.5">
-              <div class="text-[11px] uppercase opacity-70 font-bold">Ajouter un magasin</div>
-              <input id="pb-new-name" placeholder="Nom du magasin" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
-              <input id="pb-new-url" placeholder="https://www.simplebooth.com/gallery/..." class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
-              <div class="flex gap-2">
-                <button id="pb-add-store" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">➕ Ajouter</button>
-                <button id="pb-save-stores" class="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded-lg py-1.5 text-xs font-bold">💾 Enregistrer</button>
+          <button id="btn-mobile-regie-qr" class="w-full bg-indigo-600/80 hover:bg-indigo-600 rounded-xl px-3 py-2 text-xs font-bold text-left">📱 Ouvrir la Régie sur mon cellulaire (QR)</button>
+          <div id="regie-mobile-qr-box" class="hidden bg-slate-950/80 border border-white/15 rounded-xl p-3 flex flex-col items-center gap-2 text-center">
+            <div class="bg-white p-2 rounded-xl w-36 h-36 mx-auto flex items-center justify-center"><div id="regie-inline-qr" class="w-full"></div></div>
+            <div id="regie-inline-qr-status" class="text-[11px] opacity-80">Scannez et entrez le mot de passe AdminLGE sur votre cellulaire</div>
+          </div>
+          <div class="border-t border-white/10 pt-3">
+            <div class="flex items-center justify-between text-xs uppercase tracking-wider opacity-75 mb-2">
+              <span>Catégorie du quiz (15 questions)</span>
+              <span id="regie-vote-hint" class="text-indigo-300 font-bold"></span>
+            </div>
+            <div id="regie-cats" class="flex flex-col gap-1.5"></div>
+          </div>
+          <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📸 Photobooth (Cookie local)</span>
+              <button id="pb-refresh" title="Rafraîchir les photos" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-2 py-1">🔄 Actualiser</button>
+            </div>
+            <button id="btn-pb-toggle" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition bg-emerald-600/80 hover:bg-emerald-600">👁️ Photobooth : Affiché</button>
+            <select id="pb-store-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-sm font-bold text-white outline-none"></select>
+            <div class="grid grid-cols-2 gap-2">
+              <select id="pb-speed-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
+                <option value="2">Vitesse : Rapide (2s/photo)</option>
+                <option value="4">Vitesse : Normale (4s/photo)</option>
+                <option value="6">Vitesse : Douce (6s/photo)</option>
+                <option value="10">Vitesse : Lente (10s/photo)</option>
+              </select>
+              <select id="pb-order-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-white outline-none">
+                <option value="asc">Ordre : Chronologique</option>
+                <option value="desc">Ordre : Récentes d'abord</option>
+              </select>
+            </div>
+            <div id="pb-regie-status" class="text-[11px] opacity-70"></div>
+            <button id="btn-pb-manage" class="text-xs bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2 font-bold text-left">🔗 Gérer les 7 magasins / Ajouter un lieu</button>
+            <div id="pb-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
+              <div id="pb-stores-editor" class="flex flex-col gap-2"></div>
+              <div class="border-t border-white/10 pt-2 flex flex-col gap-1.5">
+                <div class="text-[11px] uppercase opacity-70 font-bold">Ajouter un magasin</div>
+                <input id="pb-new-name" placeholder="Nom du magasin" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+                <input id="pb-new-url" placeholder="https://www.simplebooth.com/gallery/..." class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+                <div class="flex gap-2">
+                  <button id="pb-add-store" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">➕ Ajouter</button>
+                  <button id="pb-save-stores" class="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded-lg py-1.5 text-xs font-bold">💾 Enregistrer</button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📊 Stats Google Drive</span>
-            <div class="flex items-center gap-1.5">
-              <a href="https://docs.google.com/spreadsheets/d/1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI/edit?gid=0#gid=0" target="_blank" rel="noopener" class="text-[11px] bg-emerald-600/80 hover:bg-emerald-600 rounded-lg px-2 py-0.5 font-bold">📄 Ouvrir Sheet</a>
-              <a href="/api/stats/csv" download="laser-quiz-stats.csv" class="text-[11px] bg-white/10 hover:bg-white/20 rounded-lg px-2 py-0.5 font-bold">📥 CSV</a>
+          <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-wider opacity-75 font-bold">📊 Stats Google Drive</span>
+              <div class="flex items-center gap-1.5">
+                <a href="https://docs.google.com/spreadsheets/d/1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI/edit?gid=0#gid=0" target="_blank" rel="noopener" class="text-[11px] bg-emerald-600/80 hover:bg-emerald-600 rounded-lg px-2 py-0.5 font-bold">📄 Ouvrir Sheet</a>
+                <a href="/api/stats/csv" download="laser-quiz-stats.csv" class="text-[11px] bg-white/10 hover:bg-white/20 rounded-lg px-2 py-0.5 font-bold">📥 CSV</a>
+              </div>
+            </div>
+            <input id="sheets-webhook-input" placeholder="URL Webhook Apps Script (https://script.google.com/.../exec)" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-[11px] text-white outline-none" />
+            <div class="flex gap-2">
+              <button id="btn-sheets-save" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">💾 Activer</button>
+              <button id="btn-sheets-test" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg py-1.5 text-xs font-bold">🧪 Tester</button>
+            </div>
+            <div id="sheets-status" class="text-[11px] opacity-75"></div>
+          </div>
+          <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+            <div class="text-xs uppercase tracking-wider opacity-75 font-bold">🔐 Sécurité &amp; Utilisateurs</div>
+            <button id="btn-page-lock" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition bg-emerald-600/80 hover:bg-emerald-600">🔒 Blocage page (LGE) : ACTIVÉ</button>
+            <button id="btn-pwd-toggle" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left bg-white/10 hover:bg-white/20">🔑 Modifier mots de passe (LGE / AdminLGE)</button>
+            <div id="pwd-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
+              <select id="pwd-target-user" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-bold text-white outline-none">
+                <option value="LGE">Utilisateur : LGE (Page Quiz)</option>
+                <option value="AdminLGE">Utilisateur : AdminLGE (Régie)</option>
+              </select>
+              <input id="pwd-new-input" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+              <button id="pwd-save-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">💾 Changer le mot de passe</button>
+              <div id="pwd-feedback" class="text-[11px] min-h-[1rem]"></div>
             </div>
           </div>
-          <input id="sheets-webhook-input" placeholder="URL Webhook Apps Script (https://script.google.com/.../exec)" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-[11px] text-white outline-none" />
-          <div class="flex gap-2">
-            <button id="btn-sheets-save" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">💾 Activer</button>
-            <button id="btn-sheets-test" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-lg py-1.5 text-xs font-bold">🧪 Tester</button>
-          </div>
-          <div id="sheets-status" class="text-[11px] opacity-75"></div>
-        </div>
-        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
-          <div class="text-xs uppercase tracking-wider opacity-75 font-bold">🔐 Sécurité &amp; Utilisateurs</div>
-          <button id="btn-page-lock" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left transition bg-emerald-600/80 hover:bg-emerald-600">🔒 Blocage page (LGE) : ACTIVÉ</button>
-          <button id="btn-pwd-toggle" class="w-full rounded-xl px-3 py-2 text-xs font-bold text-left bg-white/10 hover:bg-white/20">🔑 Modifier mots de passe (LGE / AdminLGE)</button>
-          <div id="pwd-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
-            <select id="pwd-target-user" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs font-bold text-white outline-none">
-              <option value="LGE">Utilisateur : LGE (Page Quiz)</option>
-              <option value="AdminLGE">Utilisateur : AdminLGE (Régie)</option>
-            </select>
-            <input id="pwd-new-input" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
-            <button id="pwd-save-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 rounded-lg py-1.5 text-xs font-bold">💾 Changer le mot de passe</button>
-            <div id="pwd-feedback" class="text-[11px] min-h-[1rem]"></div>
+          <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
+            <div class="text-xs uppercase tracking-wider opacity-75 font-bold">👥 Joueurs en salle <span id="regie-player-count" class="text-amber-300"></span></div>
+            <div id="regie-players" class="flex flex-col gap-1.5"></div>
           </div>
         </div>
-        <div class="border-t border-white/10 pt-3 flex flex-col gap-2">
-          <div class="text-xs uppercase tracking-wider opacity-75 font-bold">👥 Joueurs en salle <span id="regie-player-count" class="text-amber-300"></span></div>
-          <div id="regie-players" class="flex flex-col gap-1.5 max-h-40 overflow-y-auto pr-1"></div>
+        <div class="shrink-0 px-3 py-2.5 border-t border-white/10 bg-slate-950/90 flex gap-2">
+          <button id="regie-up-bot" class="flex-1 bg-white/15 hover:bg-white/25 active:scale-95 rounded-xl py-2 text-xs font-bold">⬆️ Monter</button>
+          <button id="regie-down-bot" class="flex-1 bg-white/15 hover:bg-white/25 active:scale-95 rounded-xl py-2 text-xs font-bold">⬇️ Descendre</button>
         </div>
       </div>
 
       <div id="page-lock-overlay" class="hidden fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-6">
-        <div class="w-full max-w-md bg-slate-900/95 border border-white/15 rounded-3xl p-7 shadow-2xl flex flex-col gap-4 text-center pop">
-          <div class="flex justify-center">
-            <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-14 w-auto object-contain" />
+        <div class="w-full max-w-2xl bg-slate-900/95 border border-white/15 rounded-3xl p-7 shadow-2xl grid md:grid-cols-2 gap-6 items-center pop">
+          <div class="flex flex-col gap-4 text-center">
+            <div class="flex justify-center">
+              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-14 w-auto object-contain" />
+            </div>
+            <h2 class="text-3xl font-black">🔒 Quiz Verrouillé</h2>
+            <p class="text-sm opacity-75">Connectez-vous avec le compte <b>LGE</b> pour débloquer la page et lancer le quiz.</p>
+            <div class="flex flex-col gap-2.5 text-left">
+              <input id="lock-user" value="LGE" placeholder="Identifiant (ex : LGE)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+              <input id="lock-pass" type="password" placeholder="Mot de passe" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+            </div>
+            <button id="lock-submit" class="w-full rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black py-3 text-lg shadow-xl active:scale-95 transition">
+              🔓 Débloquer &amp; Lancer le Quiz
+            </button>
+            <div id="lock-err" class="text-xs text-rose-300 min-h-[1rem]"></div>
           </div>
-          <h2 class="text-3xl font-black">🔒 Quiz Verrouillé</h2>
-          <p class="text-sm opacity-75">Connectez-vous avec le compte <b>LGE</b> pour débloquer la page et lancer le quiz.</p>
-          <div class="flex flex-col gap-2.5 text-left">
-            <input id="lock-user" value="LGE" placeholder="Identifiant (ex : LGE)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
-            <input id="lock-pass" type="password" placeholder="Mot de passe" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+          <div class="bg-white/5 border border-white/10 rounded-2xl p-5 flex flex-col items-center gap-3 text-center">
+            <div class="text-sm font-black text-amber-300">📱 Débloquer avec un cellulaire</div>
+            <div class="bg-white p-3 rounded-2xl w-44 h-44 mx-auto flex items-center justify-center"><div id="lock-qr" class="w-full"></div></div>
+            <p class="text-xs opacity-75 leading-snug">Scannez et validez le mot de passe <b>LGE</b> ou <b>AdminLGE</b> sur votre téléphone.</p>
+            <button id="lock-qr-refresh" class="text-xs bg-white/10 hover:bg-white/20 rounded-xl px-3 py-1.5 font-bold">🔄 Nouveau QR</button>
           </div>
-          <button id="lock-submit" class="w-full rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black py-3 text-lg shadow-xl active:scale-95 transition">
-            🔓 Débloquer &amp; Lancer le Quiz
-          </button>
-          <div id="lock-err" class="text-xs text-rose-300 min-h-[1rem]"></div>
         </div>
       </div>
 
@@ -417,6 +443,11 @@
             <button id="admin-login-btn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 rounded-xl py-2.5 text-sm font-black">🔐 Connexion Régie</button>
           </div>
           <div id="admin-login-err" class="text-xs text-rose-300 text-center min-h-[1rem]"></div>
+          <div class="border-t border-white/10 pt-3 flex flex-col items-center gap-2 text-center">
+            <div class="text-xs font-bold text-indigo-300">📱 Ou scanner avec un cellulaire (AdminLGE)</div>
+            <div class="bg-white p-2.5 rounded-2xl w-36 h-36 mx-auto flex items-center justify-center"><div id="admin-qr" class="w-full"></div></div>
+            <div class="text-[11px] opacity-70">Mot de passe requis sur téléphone · Ouvre la Régie mobile</div>
+          </div>
         </div>
         <div id="admin-change-box" class="hidden w-full max-w-sm bg-slate-900 border border-amber-300/40 rounded-3xl p-6 shadow-2xl flex flex-col gap-3">
           <h3 class="text-xl font-black text-center text-amber-300">🔑 Première connexion AdminLGE</h3>
@@ -436,6 +467,7 @@
       const regie = $("regie");
       if (!regie.classList.contains("hidden")) {
         regie.classList.add("hidden");
+        stopPairingQR("regie-inline-qr");
         return;
       }
       if (adminAuthed) {
@@ -447,10 +479,56 @@
       $("admin-login-box").classList.remove("hidden");
       $("admin-change-box").classList.add("hidden");
       $("admin-modal").classList.remove("hidden");
+      startPairingQR("regie", "admin-qr");
       setTimeout(() => $("admin-pass").focus(), 50);
     };
-    $("admin-cancel-btn").onclick = () => $("admin-modal").classList.add("hidden");
-    $("regie-close").onclick = () => $("regie").classList.add("hidden");
+    $("admin-cancel-btn").onclick = () => {
+      stopPairingQR("admin-qr");
+      $("admin-modal").classList.add("hidden");
+    };
+    $("regie-close").onclick = () => {
+      stopPairingQR("regie-inline-qr");
+      $("regie").classList.add("hidden");
+    };
+    $("lock-qr-refresh").onclick = () => startPairingQR("page", "lock-qr");
+    $("btn-mobile-regie-qr").onclick = () => {
+      const box = $("regie-mobile-qr-box");
+      box.classList.toggle("hidden");
+      if (!box.classList.contains("hidden")) {
+        setText("regie-inline-qr-status", "Scannez et entrez le mot de passe AdminLGE sur votre cellulaire");
+        startPairingQR("regie", "regie-inline-qr");
+      } else {
+        stopPairingQR("regie-inline-qr");
+      }
+    };
+    function scrollRegie(delta) {
+      const body = $("regie-body");
+      if (!body) return;
+      if (typeof body.scrollBy === "function") {
+        try {
+          body.scrollBy({ top: delta, behavior: "smooth" });
+          return;
+        } catch (_) {}
+      }
+      body.scrollTop += delta;
+    }
+    $("regie-up-top").onclick = () => scrollRegie(-240);
+    $("regie-down-top").onclick = () => scrollRegie(240);
+    $("regie-up-bot").onclick = () => scrollRegie(-240);
+    $("regie-down-bot").onclick = () => scrollRegie(240);
+    document.addEventListener("keydown", (e) => {
+      const regie = $("regie");
+      if (!regie || regie.classList.contains("hidden")) return;
+      const tag = ((document.activeElement && document.activeElement.tagName) || "").toUpperCase();
+      if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowDown" || e.key === "PageDown") {
+        e.preventDefault();
+        scrollRegie(e.key === "PageDown" ? 360 : 180);
+      } else if (e.key === "ArrowUp" || e.key === "PageUp") {
+        e.preventDefault();
+        scrollRegie(e.key === "PageUp" ? -360 : -180);
+      }
+    });
     $("btn-next").onclick = () => send("NEXT");
     $("btn-speed").onclick = () => send("TOGGLE_SPEED");
     $("btn-vote").onclick = () => send("TOGGLE_VOTE");
@@ -706,6 +784,105 @@
     }
     function send(type, extra = {}) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...extra })); }
 
+    const pairTimers = {};
+
+    function stopPairingQR(containerId) {
+      if (pairTimers[containerId]) {
+        clearInterval(pairTimers[containerId]);
+        delete pairTimers[containerId];
+      }
+    }
+
+    function stopAllPairingQR() {
+      for (const k of Object.keys(pairTimers)) stopPairingQR(k);
+    }
+
+    function isPairingVisible(containerId) {
+      if (containerId === "lock-qr") {
+        const ov = $("page-lock-overlay");
+        return !!(ov && !ov.classList.contains("hidden"));
+      }
+      if (containerId === "admin-qr") {
+        const mod = $("admin-modal"), box = $("admin-login-box");
+        return !!(mod && !mod.classList.contains("hidden") && box && !box.classList.contains("hidden"));
+      }
+      if (containerId === "regie-inline-qr") {
+        const reg = $("regie"), box = $("regie-mobile-qr-box");
+        return !!(reg && !reg.classList.contains("hidden") && box && !box.classList.contains("hidden"));
+      }
+      return false;
+    }
+
+    async function startPairingQR(target, containerId) {
+      stopPairingQR(containerId);
+      const box = $(containerId);
+      if (!box) return;
+      box.innerHTML = `<div class="text-xs text-slate-600 font-bold py-6 text-center">QR…</div>`;
+      try {
+        const res = await fetch("/api/auth/pair-create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ room: roomCode, target }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          box.innerHTML = `<div class="text-xs text-rose-600 font-bold p-2 text-center">Erreur QR</div>`;
+          return;
+        }
+        if (data.room && data.room !== roomCode) {
+          roomCode = data.room;
+          localStorage.setItem("qal_tv_room", roomCode);
+        }
+        box.innerHTML = "";
+        const authUrl = `${window.location.origin}/?tv_auth=${encodeURIComponent(data.pair_code)}&target=${encodeURIComponent(target)}`;
+        new QRCode(box, {
+          text: authUrl,
+          width: 256,
+          height: 256,
+          colorDark: "#1e1b4b",
+          colorLight: "#ffffff",
+          correctLevel: QRCode.CorrectLevel.M,
+        });
+
+        pairTimers[containerId] = setInterval(async () => {
+          if (!isPairingVisible(containerId)) {
+            stopPairingQR(containerId);
+            return;
+          }
+          try {
+            const stRes = await fetch(`/api/auth/pair-status?code=${encodeURIComponent(data.pair_code)}&consume=1`);
+            const st = await stRes.json();
+            if (!st.ok && st.expired) {
+              if (isPairingVisible(containerId)) startPairingQR(target, containerId);
+              else stopPairingQR(containerId);
+              return;
+            }
+            if (st.approved && st.token) {
+              stopPairingQR(containerId);
+              userToken = st.token;
+              localStorage.setItem("qal_user_token", userToken);
+              pageUnlocked = true;
+              if (st.role === "admin") {
+                adminToken = st.token;
+                localStorage.setItem("qal_admin_token", adminToken);
+                adminAuthed = true;
+              }
+              if (containerId === "regie-inline-qr") {
+                setText("regie-inline-qr-status", `✅ Régie mobile connectée (${st.username})`);
+              }
+              if (target === "regie" && $("admin-modal") && !$("admin-modal").classList.contains("hidden")) {
+                $("admin-modal").classList.add("hidden");
+                $("regie").classList.remove("hidden");
+              }
+              syncLockOverlay();
+            }
+          } catch (_) {}
+        }, 1500);
+      } catch (_) {
+        box.innerHTML = `<div class="text-xs text-rose-600 font-bold p-2 text-center">Hors ligne</div>`;
+      }
+    }
+
     function startTVSession() {
       if (tvStarted) return;
       tvStarted = true;
@@ -721,13 +898,16 @@
       const overlay = $("page-lock-overlay");
       if (!pageLockEnabled || pageUnlocked) {
         if (overlay) overlay.classList.add("hidden");
+        stopPairingQR("lock-qr");
         startTVSession();
       } else {
         if (overlay) overlay.classList.remove("hidden");
+        if (!pairTimers["lock-qr"]) startPairingQR("page", "lock-qr");
       }
     }
 
     function openFirstLoginChangeModal(changeToken, source) {
+      stopPairingQR("admin-qr");
       pendingChangeToken = changeToken;
       pendingChangeSource = source;
       $("admin-new-pass").value = "";
@@ -798,6 +978,7 @@
         localStorage.setItem("qal_user_token", userToken);
         adminAuthed = true;
         pageUnlocked = true;
+        stopPairingQR("admin-qr");
         $("admin-pass").value = "";
         $("admin-modal").classList.add("hidden");
         syncLockOverlay();
@@ -937,8 +1118,7 @@
                   <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3.5 py-1 text-sm font-bold"></div>
                 </div>
                 <div class="bg-white p-4 rounded-3xl shadow-2xl mt-3 w-[min(260px,34vh)]"><div id="big-qr"></div></div>
-                <div class="mt-2 text-base opacity-80">ou rendez-vous sur <span class="font-mono text-amber-200">${esc(window.location.origin)}</span></div>
-                <div class="mt-0.5 text-lg">Code de la salle</div>
+                <div class="mt-2 text-lg">Code de la salle</div>
                 <div class="text-5xl xl:text-6xl font-black tracking-[0.28em] text-amber-300 drop-shadow">${esc(s.room)}</div>
               </div>
               <div class="flex flex-col h-full min-h-0 py-2 gap-3">
@@ -1895,6 +2075,378 @@
         }
       }
     }
+  }
+
+  /* ======================================================================
+   *  MODE STAFF / RÉGIE SUR CELLULAIRE (via scan QR TV)
+   * ==================================================================== */
+  function initStaffAuth() {
+    let pairTarget = params.get("target") === "regie" ? "regie" : "page";
+    let pairRoom = "";
+
+    function renderExpired() {
+      app.innerHTML = `
+        <div class="h-[100dvh] flex flex-col max-w-md mx-auto p-6 items-center justify-center text-center gap-4">
+          <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain" />
+          <div class="text-5xl">⏰</div>
+          <h1 class="text-2xl font-black">QR code expiré</h1>
+          <p class="text-sm opacity-75">Appuyez sur <b>Nouveau QR</b> sur l'écran TV puis scannez à nouveau avec votre cellulaire.</p>
+        </div>`;
+    }
+
+    function renderAdminMobileLogin(roomCode) {
+      let pendingToken = "";
+      app.innerHTML = `
+        <div class="h-[100dvh] flex flex-col max-w-md mx-auto p-5 justify-center gap-4">
+          <div class="flex justify-center"><img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain" /></div>
+          <h1 class="text-2xl font-black text-center">⚙️ Régie Mobile (AdminLGE)</h1>
+          <p class="text-xs opacity-75 text-center">Salle <b>${esc(roomCode)}</b> · Mot de passe AdminLGE requis</p>
+          <input id="ma-user" value="AdminLGE" placeholder="Identifiant" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none" />
+          <input id="ma-pass" type="password" placeholder="Mot de passe AdminLGE" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none" />
+          <div id="ma-chg-box" class="hidden flex flex-col gap-2">
+            <div class="text-xs text-amber-300 font-bold text-center">🔑 1ʳᵉ connexion : choisissez un nouveau mot de passe</div>
+            <input id="ma-new" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-xl bg-slate-800 border border-amber-300/40 px-4 py-3 text-base font-bold text-white outline-none" />
+            <input id="ma-conf" type="password" placeholder="Confirmer le nouveau mot de passe" class="w-full rounded-xl bg-slate-800 border border-amber-300/40 px-4 py-3 text-base font-bold text-white outline-none" />
+          </div>
+          <button id="ma-submit" class="w-full rounded-xl bg-indigo-600 hover:bg-indigo-500 font-black py-3.5 text-base shadow-xl active:scale-95 transition">🔐 Ouvrir la Régie Mobile</button>
+          <div id="ma-err" class="text-xs text-rose-300 text-center min-h-[1rem]"></div>
+        </div>`;
+
+      async function doAdminMobileLogin() {
+        setText("ma-err", "");
+        if (pendingToken) {
+          const new_password = $("ma-new").value || "";
+          const conf = $("ma-conf").value || "";
+          if (new_password !== conf) { setText("ma-err", "Les deux mots de passe ne correspondent pas."); return; }
+          if (new_password.trim().length < 4) { setText("ma-err", "Minimum 4 caractères requis."); return; }
+          try {
+            const r = await fetch("/api/auth/change-password", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: pendingToken, new_password }),
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) { setText("ma-err", d.detail || "Erreur"); return; }
+            renderMobileRegie(roomCode, d.token);
+          } catch (e) { setText("ma-err", e.message || "Erreur réseau"); }
+          return;
+        }
+        try {
+          const r = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: ($("ma-user").value || "").trim(), password: $("ma-pass").value || "", target: "regie" }),
+          });
+          const d = await r.json();
+          if (!r.ok || !d.ok) { setText("ma-err", d.detail || "Identifiant ou mot de passe incorrect."); return; }
+          if (d.must_change_password) {
+            pendingToken = d.change_token;
+            $("ma-chg-box").classList.remove("hidden");
+            setText("ma-submit", "💾 Enregistrer & Ouvrir la Régie");
+            $("ma-new").focus();
+            return;
+          }
+          renderMobileRegie(roomCode, d.token);
+        } catch (e) { setText("ma-err", e.message || "Erreur réseau"); }
+      }
+      $("ma-submit").onclick = doAdminMobileLogin;
+      $("ma-pass").onkeydown = (e) => { if (e.key === "Enter") doAdminMobileLogin(); };
+      $("ma-conf").onkeydown = (e) => { if (e.key === "Enter") doAdminMobileLogin(); };
+      setTimeout(() => $("ma-pass").focus(), 60);
+    }
+
+    function renderLgeUnlocked(roomCode) {
+      app.innerHTML = `
+        <div class="h-[100dvh] flex flex-col max-w-md mx-auto p-6 items-center justify-center text-center gap-4 pop">
+          <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain" />
+          <div class="text-6xl">✅</div>
+          <h1 class="text-3xl font-black text-emerald-300">TV débloquée !</h1>
+          <p class="text-sm opacity-80">Salle <b class="text-amber-300 font-mono text-base">${esc(roomCode)}</b> · Le quiz est maintenant lancé sur l'écran TV.</p>
+          <button id="staff-switch-admin" class="w-full rounded-2xl bg-indigo-600 hover:bg-indigo-500 py-3 px-4 font-bold text-sm shadow-lg active:scale-95 transition mt-2">
+            ⚙️ Connexion AdminLGE (Régie Mobile)
+          </button>
+        </div>`;
+      $("staff-switch-admin").onclick = () => renderAdminMobileLogin(roomCode);
+    }
+
+    function renderMobileRegie(roomCode, adminToken) {
+      let ws = null;
+      let state = null;
+      let catsBuiltKey = "";
+      let catsStateKey = "";
+      let playersKey = "";
+
+      app.innerHTML = `
+        <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
+          <header class="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-slate-950/60 gap-2 shrink-0">
+            <div class="flex items-center gap-2">
+              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-8 w-auto object-contain" />
+              <div>
+                <div class="font-black text-base leading-tight">⚙️ Régie <span class="text-amber-300">Mobile</span></div>
+                <div id="mregie-conn" class="text-[11px] opacity-75">Connexion…</div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-xs font-mono bg-white/10 rounded-full px-2.5 py-0.5 text-amber-300 font-bold">${esc(roomCode)}</div>
+              <div class="text-[11px] opacity-80 mt-0.5"><span id="mregie-phase">-</span> · <b id="mregie-timer">0</b>s</div>
+            </div>
+          </header>
+          <main class="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
+            <div class="grid grid-cols-3 gap-2">
+              <button id="mr-next" class="bg-indigo-600 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">⏭️ Suivant</button>
+              <button id="mr-speed" class="bg-amber-500 text-slate-950 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">⚡ 1x</button>
+              <button id="mr-vote" class="bg-violet-600 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">🗳️ OFF</button>
+            </div>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
+              <div class="flex items-center justify-between text-xs uppercase tracking-wider font-bold opacity-80">
+                <span>Catégorie (15 questions)</span>
+                <span id="mr-vote-hint" class="text-indigo-300"></span>
+              </div>
+              <div id="mr-cats" class="flex flex-col gap-1.5"></div>
+            </div>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2.5">
+              <div class="text-xs uppercase tracking-wider font-bold opacity-80">🔐 Sécurité &amp; Utilisateurs</div>
+              <button id="mr-lock-btn" class="w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left bg-emerald-600/80">🔒 Blocage page (LGE) : ACTIVÉ</button>
+              <select id="mr-pwd-user" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
+                <option value="LGE">Modifier mot de passe : LGE</option>
+                <option value="AdminLGE">Modifier mot de passe : AdminLGE</option>
+              </select>
+              <div class="flex gap-2">
+                <input id="mr-pwd-val" type="password" placeholder="Nouveau mot de passe" class="flex-1 rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs text-white outline-none" />
+                <button id="mr-pwd-save" class="bg-indigo-600 active:scale-95 rounded-xl px-3 py-2 text-xs font-bold">💾 OK</button>
+              </div>
+              <div id="mr-pwd-fb" class="text-[11px] min-h-[1rem]"></div>
+            </div>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-wider font-bold opacity-80">📊 Stats Google Drive</span>
+                <div class="flex gap-1.5">
+                  <a href="https://docs.google.com/spreadsheets/d/1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI/edit?gid=0#gid=0" target="_blank" rel="noopener" class="text-[11px] bg-emerald-600/80 rounded-lg px-2 py-1 font-bold">📄 Sheet</a>
+                  <a href="/api/stats/csv" download="laser-quiz-stats.csv" class="text-[11px] bg-white/10 rounded-lg px-2 py-1 font-bold">📥 CSV</a>
+                </div>
+              </div>
+              <input id="mr-webhook" placeholder="URL Webhook Apps Script (/exec)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs text-white outline-none" />
+              <div class="flex gap-2">
+                <button id="mr-sheets-save" class="flex-1 bg-indigo-600 rounded-xl py-2 text-xs font-bold">💾 Activer</button>
+                <button id="mr-sheets-test" class="flex-1 bg-amber-500 text-slate-950 rounded-xl py-2 text-xs font-bold">🧪 Tester</button>
+              </div>
+              <div id="mr-sheets-status" class="text-[11px] opacity-80"></div>
+            </div>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
+              <div class="text-xs uppercase tracking-wider font-bold opacity-80">👥 Joueurs en salle <span id="mr-pcount" class="text-amber-300"></span></div>
+              <div id="mr-players" class="flex flex-col gap-1.5"></div>
+            </div>
+          </main>
+        </div>`;
+
+      function sendTv(type, extra = {}) {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...extra }));
+      }
+      function connectRegieWs() {
+        ws = new WebSocket(`${WS_BASE}/ws/tv?room=${encodeURIComponent(roomCode)}`);
+        ws.onopen = () => setText("mregie-conn", "🟢 Connecté");
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "state") {
+            state = msg;
+            updateMobileRegie();
+          }
+        };
+        ws.onclose = () => { setText("mregie-conn", "🔴 Reconnexion…"); setTimeout(connectRegieWs, 2000); };
+      }
+      connectRegieWs();
+
+      $("mr-next").onclick = () => sendTv("NEXT");
+      $("mr-speed").onclick = () => sendTv("TOGGLE_SPEED");
+      $("mr-vote").onclick = () => sendTv("TOGGLE_VOTE");
+      $("mr-lock-btn").onclick = () => sendTv("TOGGLE_PAGE_LOCK");
+      $("mr-sheets-save").onclick = () => sendTv("SET_SHEETS_WEBHOOK", { webhook_url: ($("mr-webhook").value || "").trim() });
+      $("mr-sheets-test").onclick = () => { setText("mr-sheets-status", "Test en cours…"); sendTv("TEST_SHEETS_PUSH"); };
+      $("mr-pwd-save").onclick = async () => {
+        setText("mr-pwd-fb", "");
+        try {
+          const res = await fetch("/api/auth/change-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: adminToken, target_user: $("mr-pwd-user").value, new_password: $("mr-pwd-val").value }),
+          });
+          const d = await res.json();
+          if (!res.ok || !d.ok) { setText("mr-pwd-fb", `❌ ${d.detail || "Erreur"}`); return; }
+          if (d.username === "AdminLGE" && d.token) adminToken = d.token;
+          $("mr-pwd-val").value = "";
+          setText("mr-pwd-fb", `✅ Mot de passe de ${d.username} mis à jour !`);
+        } catch (e) { setText("mr-pwd-fb", `❌ ${e.message || "Erreur réseau"}`); }
+      };
+
+      function updateMobileRegie() {
+        const s = state;
+        if (!s) return;
+        setText("mregie-phase", s.phase);
+        setText("mregie-timer", fmt(s.timer));
+        setText("mr-speed", `⚡ ${s.speed}x`);
+        setText("mr-vote", `🗳️ ${s.voting_enabled ? "ON" : "OFF"}`);
+        setText("mr-vote-hint", s.voting_enabled ? "Vote actif" : "Régie");
+
+        const lockBtn = $("mr-lock-btn");
+        const lockKey = String(!!s.page_lock_enabled);
+        if (lockBtn.dataset.lockState !== lockKey) {
+          lockBtn.dataset.lockState = lockKey;
+          lockBtn.textContent = s.page_lock_enabled
+            ? "🔒 Blocage page (LGE) : ACTIVÉ"
+            : "🔓 Blocage page (LGE) : DÉSACTIVÉ";
+          lockBtn.className = `w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left ${
+            s.page_lock_enabled ? "bg-emerald-600/80" : "bg-slate-700 text-white/80"
+          }`;
+        }
+
+        const pushSt = s.last_push_status || {};
+        setText("mr-sheets-status", !s.sheets_webhook_set
+          ? "🟡 Webhook non configuré"
+          : pushSt.ok === false
+            ? `🔴 ${pushSt.message || "Erreur"}`
+            : pushSt.ok === true
+              ? `🟢 ${pushSt.message || "Synchro OK"}`
+              : "🟢 Drive actif");
+
+        const cats = s.categories || [];
+        const cKey = cats.join("|");
+        if (cKey !== catsBuiltKey) {
+          catsBuiltKey = cKey;
+          catsStateKey = "";
+          const box = $("mr-cats");
+          box.innerHTML = cats.map(cat => `
+            <button data-cat="${esc(cat)}" class="mr-cat-btn rounded-xl px-3 py-2 text-xs font-bold bg-white/10 flex items-center justify-between text-left">
+              <span>${catIcon(cat)} ${esc(cat)}</span>
+              <span class="mr-cat-meta text-[11px]"></span>
+            </button>`).join("");
+          box.querySelectorAll(".mr-cat-btn").forEach(btn => {
+            btn.onclick = () => sendTv("SELECT_CATEGORY", { category: btn.dataset.cat });
+          });
+        }
+
+        const played = new Set(s.played_categories || []);
+        const votes = s.votes || {};
+        const csKey = `${s.category}|${s.voting_enabled}|${(s.played_categories || []).join(",")}|${cats.map(c => votes[c] || 0).join(",")}`;
+        if (csKey !== catsStateKey) {
+          catsStateKey = csKey;
+          document.querySelectorAll(".mr-cat-btn").forEach(btn => {
+            const cat = btn.dataset.cat;
+            const active = cat === s.category;
+            const locked = played.has(cat);
+            btn.disabled = s.voting_enabled && locked;
+            btn.className = `mr-cat-btn rounded-xl px-3 py-2 text-xs font-bold flex items-center justify-between text-left ${
+              active ? "bg-amber-400 text-slate-900" : locked ? "bg-white/5 opacity-40" : "bg-white/10"
+            }`;
+            const meta = btn.querySelector(".mr-cat-meta");
+            if (meta) meta.textContent = locked ? "🔒" : (s.voting_enabled ? `🗳️ ${votes[cat] || 0}` : "");
+          });
+        }
+
+        const pKey = s.players.map(p => `${p.id}:${p.name}:${p.avatar}:${p.connected ? 1 : 0}:${p.missed_streak || 0}`).join("|");
+        if (pKey !== playersKey) {
+          playersKey = pKey;
+          setText("mr-pcount", `(${s.players.length})`);
+          const pbox = $("mr-players");
+          pbox.innerHTML = s.players.length ? s.players.map(p => `
+            <div class="bg-white/5 rounded-xl px-3 py-2 flex items-center gap-2 text-xs">
+              <span class="w-2 h-2 rounded-full ${p.connected ? "bg-emerald-400" : "bg-rose-400"}"></span>
+              <span class="text-base">${esc(p.avatar)}</span>
+              <span class="flex-1 font-semibold truncate">${esc(p.name)}</span>
+              ${p.missed_streak > 0 ? `<span class="text-[10px] bg-amber-500/20 text-amber-200 rounded px-1.5 py-0.5">⚠️ ${p.missed_streak}/5</span>` : ""}
+              <button data-kick="${esc(p.id)}" class="mr-kick-btn bg-rose-600/80 text-white rounded-lg px-2 py-1 font-bold">✕</button>
+            </div>`).join("") : `<div class="text-xs opacity-60">Aucun joueur en salle</div>`;
+          pbox.querySelectorAll(".mr-kick-btn").forEach(btn => {
+            btn.onclick = () => sendTv("KICK_PLAYER", { player_id: btn.dataset.kick });
+          });
+        }
+      }
+    }
+
+    function renderPairLogin() {
+      let needChange = false;
+      app.innerHTML = `
+        <div class="h-[100dvh] flex flex-col max-w-md mx-auto p-5 justify-center gap-4 pop">
+          <div class="flex justify-center"><img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain" /></div>
+          <h1 class="text-2xl font-black text-center">${pairTarget === "regie" ? "⚙️ Accès Régie (AdminLGE)" : "🔓 Débloquer la TV"}</h1>
+          <p class="text-xs opacity-80 text-center">
+            ${pairRoom ? `Salle <b>${esc(pairRoom)}</b> · ` : ""}
+            ${pairTarget === "regie" ? "Entrez le mot de passe AdminLGE sur votre cellulaire." : "Validez votre mot de passe LGE ou AdminLGE pour débloquer l'écran TV."}
+          </p>
+          <div class="flex flex-col gap-2.5">
+            <input id="staff-user" value="${pairTarget === "regie" ? "AdminLGE" : "LGE"}" placeholder="Identifiant (LGE ou AdminLGE)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+            <input id="staff-pass" type="password" placeholder="Mot de passe" autocomplete="current-password" class="w-full rounded-xl bg-slate-800 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:ring-2 ring-amber-400" />
+          </div>
+          <div id="staff-change-fields" class="hidden flex flex-col gap-2 bg-amber-400/10 border border-amber-300/40 rounded-2xl p-3">
+            <div class="text-xs font-bold text-amber-200 text-center">🔑 Première connexion AdminLGE : nouveau mot de passe requis</div>
+            <input id="staff-new-pass" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3.5 py-2.5 text-sm font-bold text-white outline-none" />
+            <input id="staff-confirm-pass" type="password" placeholder="Confirmer le nouveau mot de passe" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3.5 py-2.5 text-sm font-bold text-white outline-none" />
+          </div>
+          <button id="staff-submit" class="w-full rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black py-3.5 text-base shadow-xl active:scale-95 transition">
+            ${pairTarget === "regie" ? "🔐 Connexion Régie Mobile" : "🔓 Valider & Débloquer la TV"}
+          </button>
+          <div id="staff-err" class="text-xs text-rose-300 text-center min-h-[1rem]"></div>
+        </div>`;
+
+      async function doPairSubmit() {
+        setText("staff-err", "");
+        const username = ($("staff-user").value || "").trim();
+        const password = $("staff-pass").value || "";
+        let new_password = "";
+        if (needChange) {
+          new_password = $("staff-new-pass").value || "";
+          const conf = $("staff-confirm-pass").value || "";
+          if (new_password !== conf) { setText("staff-err", "Les deux mots de passe ne correspondent pas."); return; }
+          if (new_password.trim().length < 4) { setText("staff-err", "Minimum 4 caractères requis."); return; }
+        }
+        try {
+          const res = await fetch("/api/auth/pair-login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pair_code: TV_AUTH_PARAM, username, password, new_password }),
+          });
+          const d = await res.json();
+          if (!res.ok || !d.ok) {
+            setText("staff-err", d.detail || "Identifiant ou mot de passe incorrect.");
+            return;
+          }
+          if (d.must_change_password) {
+            needChange = true;
+            $("staff-change-fields").classList.remove("hidden");
+            setText("staff-submit", "💾 Enregistrer & Débloquer");
+            setText("staff-err", "Mot de passe temporaire validé : définissez votre nouveau mot de passe.");
+            $("staff-new-pass").focus();
+            return;
+          }
+          if (d.approved) {
+            if (d.role === "admin") renderMobileRegie(d.room || pairRoom, d.token);
+            else renderLgeUnlocked(d.room || pairRoom);
+          }
+        } catch (e) {
+          setText("staff-err", e.message || "Erreur réseau");
+        }
+      }
+
+      $("staff-submit").onclick = doPairSubmit;
+      $("staff-pass").onkeydown = (e) => { if (e.key === "Enter") doPairSubmit(); };
+      $("staff-confirm-pass").onkeydown = (e) => { if (e.key === "Enter") doPairSubmit(); };
+      setTimeout(() => $("staff-pass").focus(), 60);
+    }
+
+    (async function bootStaffAuth() {
+      try {
+        const res = await fetch(`/api/auth/pair-status?code=${encodeURIComponent(TV_AUTH_PARAM)}`);
+        const d = await res.json();
+        if (!res.ok || !d.ok || d.expired) {
+          renderExpired();
+          return;
+        }
+        pairTarget = d.target || pairTarget;
+        pairRoom = d.room || "";
+        renderPairLogin();
+      } catch (_) {
+        renderPairLogin();
+      }
+    })();
   }
 </script>
 </body>
