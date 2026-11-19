@@ -449,6 +449,7 @@ class Room:
         self.pending_kicks: list[tuple[WebSocket, str]] = []
         self.game_had_players = False
         self.session_ip: str = ""
+        self.photobooth_store: str = ""
         self.current_game_id: str = ""
         self.game_started_at: float | None = None
         self.game_ended_at: float | None = None
@@ -650,9 +651,12 @@ class Room:
             f"{s['name']}: {_format_duration(d)}" for s, d in zip(stats_list, durs)
         )
         ts = self.game_timestamp_str or _now_quebec_str()
+        ip_label = self.session_ip or "Inconnue"
+        if self.photobooth_store:
+            ip_label = f"{ip_label} · {self.photobooth_store}"
         row = [
             ts,
-            self.session_ip or "Inconnue",
+            ip_label,
             len(stats_list),
             f"{avg_q:g} moy. ({detail_q})",
             f"{avg_t} moy. ({detail_t})",
@@ -1862,6 +1866,8 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                 _save_auth_state(AUTH_STATE)
                 for r in list(rooms.values()):
                     await r.broadcast()
+            elif cmd == "SET_PHOTOBOOTH_STORE":
+                current.photobooth_store = str(msg.get("store") or "").strip()[:64]
             elif cmd == "SET_SHEETS_WEBHOOK":
                 global LAST_PUSH_STATUS
                 try:

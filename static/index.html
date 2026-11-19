@@ -642,6 +642,7 @@
       $("pb-speed-select").value = String(pbOpts.speedSec);
       $("pb-order-select").value = pbOpts.order;
       applyPhotoboothVisibility();
+      send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
     }
     function renderStoresEditor() {
       const box = $("pb-stores-editor");
@@ -673,6 +674,7 @@
     $("pb-store-select").onchange = (e) => {
       pbSelectedStore = e.target.value;
       setCookie("lge_pb_store", pbSelectedStore);
+      send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
       pbTrackKey = "";
       loadPhotobooth(false);
     };
@@ -764,7 +766,10 @@
     function connect() {
       const qs = roomCode ? `?room=${encodeURIComponent(roomCode)}` : "";
       ws = new WebSocket(`${WS_BASE}/ws/tv${qs}`);
-      ws.onopen = () => setText("conn", "🟢 Connecté");
+      ws.onopen = () => {
+        setText("conn", "🟢 Connecté");
+        send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
+      };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === "room") {
