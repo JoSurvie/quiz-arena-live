@@ -226,8 +226,8 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 ### Mise à jour en temps réel (`upsert` par `game_id`) & Configuration
 - Si un joueur clique sur un bouton de partage pendant les 60 s du `PODIUM`, le serveur appelle à nouveau `trigger_stats_push()` avec le même `game_id` : `doPost()` dans [google_sheets_webhook.gs](google_sheets_webhook.gs) utilise `LockService` et `PropertiesService` pour mettre à jour la ligne existante (colonne 6) sans créer de doublon.
 - **Configuration du Webhook** :
-  - **Recommandé sur Render (persistant)** : définir la variable d'environnement `GOOGLE_SHEETS_WEBHOOK_URL` avec l'URL `/exec` du déploiement Web App Apps Script.
-  - **Depuis la Régie TV (`⚙️`)** : l'encart **📊 Stats Google Drive** permet d'ouvrir le Sheet, télécharger l'historique local (`/api/stats/csv`), enregistrer/tester l'URL Webhook (`SET_SHEETS_WEBHOOK` / `TEST_SHEETS_PUSH`) et consulter le statut du dernier envoi (`#sheets-status`).
+  - **Préconfiguré par défaut dans le code (`DEFAULT_SHEETS_WEBHOOK_URL`)** : pointe directement vers l'URL Apps Script (`https://script.google.com/macros/s/AKfycbzN4UOWzIC1JEsIYFr8qXAXBHSxTjqnuqgX5cdBENIBi-owIYLAk835w5lO_Zz5SpszpA/exec`), utilisable sans aucune configuration manuelle sur Render.
+  - Surchargeable à tout moment via `GOOGLE_SHEETS_WEBHOOK_URL` ou l'encart **📊 Stats Google Drive** de la Régie TV (`SET_SHEETS_WEBHOOK` / `TEST_SHEETS_PUSH`).
 
 ---
 
@@ -236,10 +236,9 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
 - **Compte utilisateur TV `LGE`** (mot de passe initial par défaut : `LGE2026`, surchargeable via `LGE_DEFAULT_PASSWORD`) :
   - Débloque l'écran d'accueil verrouillé (`#page-lock-overlay`) et lance la session TV/WebSocket (`startTVSession()`).
   - N'a pas accès au panneau Régie (`POST /api/auth/login` avec `target="regie"` renvoie HTTP `403`).
-- **Compte administrateur Régie `AdminLGE`** (mot de passe temporaire initial : `Admin2026!`, surchargeable via `ADMIN_DEFAULT_PASSWORD`) :
-  - Protège l'ouverture du panneau **Régie (`⚙️`)** via la modale `#admin-modal`.
-  - **Changement obligatoire à la 1ʳᵉ connexion** (`must_change_password = True`) : renvoie un `change_token` temporaire et impose la saisie + confirmation d'un nouveau mot de passe (`POST /api/auth/change-password`) avant d'accéder à la Régie.
-  - Permet également de modifier les mots de passe de `LGE` et `AdminLGE` depuis l'encart **🔐 Sécurité & Utilisateurs** de la Régie (`#pwd-manage-panel`), et débloque automatiquement la page TV.
+- **Compte administrateur Régie `AdminLGE`** (mot de passe initial par défaut : `Admin2026!`, surchargeable via `ADMIN_DEFAULT_PASSWORD`) :
+  - Protège l'ouverture du panneau **Régie (`⚙️`)** via la modale `#admin-modal` (accès direct sans changement de mot de passe imposé à la 1ʳᵉ connexion).
+  - Permet de modifier à tout moment les mots de passe de `LGE` et `AdminLGE` depuis l'encart **🔐 Sécurité & Utilisateurs** de la Régie (`#pwd-manage-panel`), et débloque automatiquement la page TV.
 - **Sessions permanentes sans limite de temps** :
   - Les jetons `qal_user_token` et `qal_admin_token` (`localStorage`) sont signés en HMAC-SHA256 (`_make_auth_token`) sans date d'expiration (`exp`) ni déconnexion automatique.
   - Mots de passe hachés en **PBKDF2-HMAC-SHA256** (100 000 itérations + sel aléatoire) dans `auth_config.json`.
@@ -248,7 +247,7 @@ Les navigateurs intégrés des téléviseurs Samsung Tizen disposent de CPU/GPU 
   - Basculable en direct depuis la Régie (`TOGGLE_PAGE_LOCK` ou `POST /api/auth/page-lock`) pour imposer ou désactiver le déblocage par `LGE` au chargement de la page TV.
 - **Déblocage & Régie Mobile par QR Code (`/?tv_auth=CODE&target=page|regie`, réservé au staff)** :
   - Affiché uniquement sur `#page-lock-overlay` (`#lock-qr`), `#admin-login-box` (`#admin-qr`) et `#regie` (`#btn-mobile-regie-qr` → `#regie-inline-qr`), jamais pour les joueurs (`?room=XXXXX`).
-  - L'employé scanne le QR code sur son cellulaire (`initStaffAuth()`), saisit et valide obligatoirement son mot de passe (`POST /api/auth/pair-login`, avec changement imposé à la 1ʳᵉ connexion `AdminLGE`).
+  - L'employé scanne le QR code sur son cellulaire (`initStaffAuth()`), saisit et valide obligatoirement son mot de passe (`POST /api/auth/pair-login`).
   - La TV consomme le jeton via polling (`GET /api/auth/pair-status?consume=1`, TTL 10 min) pour se débloquer automatiquement. Si connecté en `AdminLGE`, le cellulaire bascule sur une interface complète **⚙️ Régie Mobile** connectée à `/ws/tv?room=XXXXX`.
 
 ---

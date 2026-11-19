@@ -70,6 +70,7 @@ DEFAULT_STORES: list[dict[str, str]] = [
 # --------------------------------------------------------------------------- #
 GOOGLE_SHEET_ID = "1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI"
 GOOGLE_SHEET_URL = f"https://docs.google.com/spreadsheets/d/{GOOGLE_SHEET_ID}/edit?gid=0#gid=0"
+DEFAULT_SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzN4UOWzIC1JEsIYFr8qXAXBHSxTjqnuqgX5cdBENIBi-owIYLAk835w5lO_Zz5SpszpA/exec"
 STATS_CONFIG_FILE = BASE_DIR / "stats_config.json"
 STATS_HEADERS = [
     "Horodatage",
@@ -122,7 +123,7 @@ def _build_default_auth_state() -> dict[str, Any]:
                 "role": "admin",
                 "salt": admin_salt,
                 "password_hash": _hash_password(DEFAULT_ADMIN_PASSWORD, admin_salt),
-                "must_change_password": True,
+                "must_change_password": False,
             },
         },
     }
@@ -143,6 +144,10 @@ def _load_auth_state() -> dict[str, Any]:
             if isinstance(loaded, dict):
                 users = loaded.get("users")
                 if isinstance(users, dict) and "LGE" in users and "AdminLGE" in users:
+                    # Changement de mot de passe à la 1re connexion désactivé.
+                    for udata in users.values():
+                        if isinstance(udata, dict):
+                            udata["must_change_password"] = False
                     return {
                         "page_lock_enabled": bool(loaded.get("page_lock_enabled", True)),
                         "users": users,
@@ -238,7 +243,8 @@ def get_sheets_webhook_url() -> str:
                 return url
         except Exception:
             pass
-    return os.environ.get("GOOGLE_SHEETS_WEBHOOK_URL", "").strip()
+    env_url = os.environ.get("GOOGLE_SHEETS_WEBHOOK_URL", "").strip()
+    return env_url or DEFAULT_SHEETS_WEBHOOK_URL
 
 
 def set_sheets_webhook_url(url: str) -> str:
@@ -1604,17 +1610,6 @@ async def api_auth_login(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     ):
         raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect.")
 
-    if user.get("must_change_password"):
-        return {
-            "ok": True,
-            "must_change_password": True,
-            "username": user["username"],
-            "role": user["role"],
-            "change_token": _make_auth_token(
-                user["username"], user["role"], purpose="pwd_change"
-            ),
-        }
-
     return {
         "ok": True,
         "must_change_password": False,
@@ -1775,25 +1770,6 @@ async def api_auth_pair_login(body: dict[str, Any] = Body(...)) -> dict[str, Any
 
     if sess["target"] == "regie" and user["username"] != "AdminLGE":
         raise HTTPException(status_code=403, detail="Seul AdminLGE peut accéder à la régie.")
-
-    if user.get("must_change_password"):
-        if not new_password:
-            return {
-                "ok": True,
-                "must_change_password": True,
-                "username": user["username"],
-                "role": user["role"],
-            }
-        if len(new_password.strip()) < 4:
-            raise HTTPException(
-                status_code=400,
-                detail="Le nouveau mot de passe doit contenir au moins 4 caractères.",
-            )
-        new_salt = secrets.token_hex(16)
-        user["salt"] = new_salt
-        user["password_hash"] = _hash_password(new_password, new_salt)
-        user["must_change_password"] = False
-        _save_auth_state(AUTH_STATE)
 
     token = _make_auth_token(user["username"], user["role"], purpose="session")
     sess["approved"] = True
