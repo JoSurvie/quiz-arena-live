@@ -290,12 +290,8 @@
             <span id="vote-badge" class="hidden text-[11px] sm:text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
             <span id="diff-badge" class="text-[11px] sm:text-xs font-bold bg-white/15 px-2.5 py-0.5 rounded-full"></span>
           </div>
-          <div id="mini-qr-wrap" class="hidden items-center gap-2 sm:gap-3 bg-white/10 rounded-2xl p-1.5 sm:p-2 pr-3 sm:pr-4">
+          <div id="mini-qr-wrap" class="hidden items-center bg-white/10 rounded-2xl p-1.5">
             <div class="bg-white p-1 sm:p-1.5 rounded-xl w-16 sm:w-20 lg:w-24"><div id="mini-qr"></div></div>
-            <div class="leading-tight">
-              <div class="text-[10px] sm:text-xs uppercase opacity-70">Rejoindre</div>
-              <div id="mini-code" class="text-lg sm:text-2xl font-black tracking-widest text-amber-300"></div>
-            </div>
           </div>
         </header>
         <main id="tv-main" class="flex-1 min-h-0 overflow-y-auto"></main>
@@ -1116,9 +1112,7 @@
                   </div>
                   <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-bold"></div>
                 </div>
-                <div class="bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-2xl mt-2 w-[clamp(110px,24vh,230px)]"><div id="big-qr"></div></div>
-                <div class="mt-1 text-xs sm:text-base opacity-85">Code de la salle</div>
-                <div class="text-3xl sm:text-4xl xl:text-5xl font-black tracking-[0.24em] text-amber-300 drop-shadow leading-none">${esc(s.room)}</div>
+                <div class="bg-white p-2.5 sm:p-3.5 rounded-2xl sm:rounded-3xl shadow-2xl mt-2 w-[clamp(130px,28vh,260px)]"><div id="big-qr"></div></div>
               </div>
               <div class="flex flex-col h-full min-h-0 py-1 sm:py-2 gap-2">
                 <div class="flex flex-wrap items-center justify-between gap-2 bg-white/10 border border-white/10 rounded-2xl px-4 sm:px-5 py-2 sm:py-3 shrink-0">
