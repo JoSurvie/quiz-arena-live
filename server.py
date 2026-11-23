@@ -392,6 +392,16 @@ TEST_BOT_PROFILES: list[tuple[str, str, float, bool]] = [
     ("Bot Cactus", "🌵", 0.38, True),
 ]
 
+DEFAULT_PHOTOBOOTH_STORES: list[dict[str, str]] = [
+    {"name": "Sainte-Foy", "url": "https://www.simplebooth.com/gallery/3DTLTk68fwVM-lge-fev-2026"},
+    {"name": "Vanier", "url": "https://www.simplebooth.com/gallery/8KonRrq3avT5-lge-fev-26"},
+    {"name": "Brossard", "url": "https://www.simplebooth.com/gallery/urjGcth7fSdh-lge-2026"},
+    {"name": "Marché Central", "url": "https://www.simplebooth.com/gallery/3vaHgUNcJUos-lge-fev-2026"},
+    {"name": "Lévis", "url": "https://www.simplebooth.com/gallery/ahebLG4GWjZF-lge-fev-2026"},
+    {"name": "Sherbrooke", "url": "https://www.simplebooth.com/gallery/XCaTpPmn6r3h-lge-fev-2026"},
+    {"name": "Ste-Catherine", "url": "https://www.simplebooth.com/gallery/ALkJDisegsdU-lge-fev-2026"},
+]
+
 
 class Player:
     def __init__(self, player_id: str, is_bot: bool = False):
@@ -473,7 +483,11 @@ class Room:
         self.pending_kicks: list[tuple[WebSocket, str]] = []
         self.game_had_players = False
         self.session_ip: str = ""
-        self.photobooth_store: str = ""
+        self.photobooth_store: str = DEFAULT_PHOTOBOOTH_STORES[0]["name"]
+        self.pb_stores: list[dict[str, str]] = [dict(s) for s in DEFAULT_PHOTOBOOTH_STORES]
+        self.pb_opts: dict[str, Any] = {"enabled": True, "speedSec": 4, "order": "asc"}
+        self.pb_refresh_seq: int = 0
+        self.pb_synced_from_tv: bool = False
         self.current_game_id: str = ""
         self.game_started_at: float | None = None
         self.game_ended_at: float | None = None
@@ -1326,6 +1340,12 @@ class Room:
             "sheets_url": GOOGLE_SHEET_URL,
             "last_push_status": LAST_PUSH_STATUS,
             "page_lock_enabled": bool(AUTH_STATE.get("page_lock_enabled", True)),
+            "pb_config": {
+                "store": self.photobooth_store,
+                "opts": self.pb_opts,
+                "stores": self.pb_stores,
+                "refresh_seq": self.pb_refresh_seq,
+            },
         }
 
     def player_state(self, p: Player) -> dict[str, Any]:
@@ -2028,6 +2048,48 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                     await r.broadcast()
             elif cmd == "SET_PHOTOBOOTH_STORE":
                 current.photobooth_store = str(msg.get("store") or "").strip()[:64]
+                await current.broadcast()
+            elif cmd == "SET_PHOTOBOOTH_CONFIG":
+                if msg.get("init_only") and current.pb_synced_from_tv:
+                    continue
+                current.pb_synced_from_tv = True
+                raw_stores = msg.get("stores")
+                if isinstance(raw_stores, list):
+                    cleaned_stores = []
+                    for item in raw_stores[:30]:
+                        if isinstance(item, dict):
+                            s_name = str(item.get("name") or "").strip()[:64]
+                            s_url = str(item.get("url") or "").strip()[:256]
+                            if s_name and s_url:
+                                cleaned_stores.append({"name": s_name, "url": s_url})
+                    if cleaned_stores:
+                        current.pb_stores = cleaned_stores
+                if "store" in msg:
+                    s_sel = str(msg.get("store") or "").strip()[:64]
+                    if any(s["name"] == s_sel for s in current.pb_stores):
+                        current.photobooth_store = s_sel
+                    elif current.pb_stores:
+                        current.photobooth_store = current.pb_stores[0]["name"]
+                raw_opts = msg.get("opts")
+                if isinstance(raw_opts, dict):
+                    speed_sec = raw_opts.get("speedSec", current.pb_opts.get("speedSec", 4))
+                    try:
+                        speed_sec = int(speed_sec)
+                    except (TypeError, ValueError):
+                        speed_sec = 4
+                    if speed_sec not in (2, 4, 6, 10):
+                        speed_sec = 4
+                    current.pb_opts = {
+                        "enabled": bool(raw_opts.get("enabled", True)),
+                        "speedSec": speed_sec,
+                        "order": "desc" if raw_opts.get("order") == "desc" else "asc",
+                    }
+                if msg.get("refresh"):
+                    current.pb_refresh_seq += 1
+                await current.broadcast()
+            elif cmd == "REFRESH_PHOTOBOOTH":
+                current.pb_refresh_seq += 1
+                await current.broadcast()
             elif cmd == "SET_SHEETS_WEBHOOK":
                 global LAST_PUSH_STATUS
                 try:

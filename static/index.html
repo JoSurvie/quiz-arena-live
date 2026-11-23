@@ -219,6 +219,17 @@
     let lastDiffKey = "";
     let lastRegieOpen = false;
     let preloadToken = 0;
+    let lastPbConfigKey = "";
+    let lastPbRefreshSeq = 0;
+
+    function pushPhotoboothConfig(extra = {}) {
+      send("SET_PHOTOBOOTH_CONFIG", {
+        store: pbSelectedStore,
+        opts: pbOpts,
+        stores: pbStores,
+        ...extra,
+      });
+    }
 
     function currentStore() {
       return pbStores.find(s => s.name === pbSelectedStore) || pbStores[0];
@@ -632,7 +643,10 @@
       panel.classList.toggle("hidden");
       if (!panel.classList.contains("hidden")) renderStoresEditor();
     };
-    $("pb-refresh").onclick = () => loadPhotobooth(true);
+    $("pb-refresh").onclick = () => {
+      loadPhotobooth(true);
+      send("REFRESH_PHOTOBOOTH");
+    };
 
     function applyPhotoboothVisibility() {
       const btn = $("btn-pb-toggle");
@@ -656,6 +670,7 @@
       pbOpts.enabled = !pbOpts.enabled;
       saveOptsCookie();
       applyPhotoboothVisibility();
+      pushPhotoboothConfig();
       if (pbOpts.enabled) {
         if (!pbPhotos.length) loadPhotobooth(false);
         else renderPhotoboothStrip(true);
@@ -693,6 +708,7 @@
           saveStoresCookie();
           syncStoreSelect();
           renderStoresEditor();
+          pushPhotoboothConfig();
           pbTrackKey = "";
           loadPhotobooth(true);
         };
@@ -701,19 +717,21 @@
     $("pb-store-select").onchange = (e) => {
       pbSelectedStore = e.target.value;
       setCookie("lge_pb_store", pbSelectedStore);
-      send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
+      pushPhotoboothConfig();
       pbTrackKey = "";
       loadPhotobooth(false);
     };
     $("pb-speed-select").onchange = (e) => {
       pbOpts.speedSec = Number(e.target.value) || 4;
       saveOptsCookie();
+      pushPhotoboothConfig();
       pbTrackKey = "";
       renderPhotoboothStrip(true);
     };
     $("pb-order-select").onchange = (e) => {
       pbOpts.order = e.target.value === "desc" ? "desc" : "asc";
       saveOptsCookie();
+      pushPhotoboothConfig();
       pbTrackKey = "";
       loadPhotobooth(false);
     };
@@ -729,6 +747,7 @@
       $("pb-new-url").value = "";
       syncStoreSelect();
       renderStoresEditor();
+      pushPhotoboothConfig();
       pbTrackKey = "";
       loadPhotobooth(true);
     };
@@ -747,6 +766,7 @@
       saveStoresCookie();
       syncStoreSelect();
       renderStoresEditor();
+      pushPhotoboothConfig();
       pbTrackKey = "";
       loadPhotobooth(true);
     };
@@ -795,7 +815,7 @@
       ws = new WebSocket(`${WS_BASE}/ws/tv${qs}`);
       ws.onopen = () => {
         setText("conn", "🟢 Connecté");
-        send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
+        pushPhotoboothConfig({ init_only: true });
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
@@ -1420,6 +1440,52 @@
         syncLockOverlay();
       }
       updatePageLockBtn();
+
+      if (s.pb_config) {
+        const pbc = s.pb_config;
+        const pbcKey = JSON.stringify({
+          store: pbc.store,
+          opts: pbc.opts,
+          stores: pbc.stores,
+        });
+        if (!lastPbConfigKey) {
+          lastPbConfigKey = pbcKey;
+          lastPbRefreshSeq = pbc.refresh_seq || 0;
+        } else if (pbcKey !== lastPbConfigKey) {
+          lastPbConfigKey = pbcKey;
+          const prevStore = pbSelectedStore;
+          const prevOrder = pbOpts.order;
+          const prevEnabled = pbOpts.enabled;
+          if (Array.isArray(pbc.stores) && pbc.stores.length) {
+            pbStores = pbc.stores.map(x => ({ name: x.name, url: x.url }));
+            saveStoresCookie();
+          }
+          if (pbc.store && pbStores.some(x => x.name === pbc.store)) {
+            pbSelectedStore = pbc.store;
+            setCookie("lge_pb_store", pbSelectedStore);
+          }
+          if (pbc.opts && typeof pbc.opts === "object") {
+            pbOpts = {
+              enabled: pbc.opts.enabled !== false,
+              speedSec: Number(pbc.opts.speedSec) || 4,
+              order: pbc.opts.order === "desc" ? "desc" : "asc",
+            };
+            saveOptsCookie();
+          }
+          syncStoreSelect();
+          if (!$("pb-manage-panel").classList.contains("hidden")) renderStoresEditor();
+          pbTrackKey = "";
+          if (pbOpts.enabled && (!prevEnabled || prevStore !== pbSelectedStore || prevOrder !== pbOpts.order || !pbPhotos.length)) {
+            loadPhotobooth(false);
+          } else {
+            renderPhotoboothStrip(true);
+          }
+        }
+        if ((pbc.refresh_seq || 0) > lastPbRefreshSeq) {
+          lastPbRefreshSeq = pbc.refresh_seq || 0;
+          loadPhotobooth(true);
+        }
+      }
 
       // 2. Badges de difficulté (uniquement si changement)
       const diffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;
@@ -2225,6 +2291,10 @@
       let catsBuiltKey = "";
       let catsStateKey = "";
       let playersKey = "";
+      let mPbConfigKey = "";
+      let mPbStores = DEFAULT_STORES.map(s => ({ ...s }));
+      let mPbSelectedStore = mPbStores[0].name;
+      let mPbOpts = { enabled: true, speedSec: 4, order: "asc" };
 
       app.innerHTML = `
         <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
@@ -2236,16 +2306,21 @@
                 <div id="mregie-conn" class="text-[11px] opacity-75">Connexion…</div>
               </div>
             </div>
-            <div class="text-right">
-              <div class="text-xs font-mono bg-white/10 rounded-full px-2.5 py-0.5 text-amber-300 font-bold">${esc(roomCode)}</div>
-              <div class="text-[11px] opacity-80 mt-0.5"><span id="mregie-phase">-</span> · <b id="mregie-timer">0</b>s</div>
+            <div class="flex items-center gap-2">
+              <div class="text-right">
+                <div class="text-xs font-mono bg-white/10 rounded-full px-2.5 py-0.5 text-amber-300 font-bold">${esc(roomCode)}</div>
+                <div class="text-[11px] opacity-80 mt-0.5"><span id="mregie-phase">-</span> · <b id="mregie-timer">0</b>s</div>
+              </div>
+              <button id="mr-up-top" title="Monter" class="bg-white/10 active:scale-95 rounded-lg px-2 py-1 text-xs font-bold">⬆️</button>
+              <button id="mr-down-top" title="Descendre" class="bg-white/10 active:scale-95 rounded-lg px-2 py-1 text-xs font-bold">⬇️</button>
             </div>
           </header>
-          <main class="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-4">
-            <div class="grid grid-cols-3 gap-2">
-              <button id="mr-next" class="bg-indigo-600 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">⏭️ Suivant</button>
-              <button id="mr-speed" class="bg-amber-500 text-slate-950 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">⚡ 1x</button>
-              <button id="mr-vote" class="bg-violet-600 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">🗳️ OFF</button>
+          <main id="mr-body" class="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3.5">
+            <div class="grid grid-cols-2 gap-2">
+              <button id="mr-next" class="bg-indigo-600 hover:bg-indigo-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">⏭️ Étape suivante</button>
+              <button id="mr-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">⚡ Vitesse : 1x</button>
+              <button id="mr-vote" class="bg-violet-600 hover:bg-violet-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">🗳️ Vote : OFF</button>
+              <button id="mr-mobile" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">📱 Vue Mobile</button>
             </div>
             <div class="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-3 flex flex-col gap-2">
               <div class="flex items-center justify-between">
@@ -2264,51 +2339,155 @@
                 </button>
               </div>
             </div>
+            <button id="mr-btn-qr" class="w-full bg-indigo-600/80 hover:bg-indigo-600 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">📱 Ouvrir la Régie sur un autre cellulaire (QR)</button>
+            <div id="mr-qr-box" class="hidden bg-slate-950/80 border border-white/15 rounded-xl p-3 flex flex-col items-center gap-2 text-center">
+              <div class="bg-white p-2 rounded-xl w-36 h-36 mx-auto flex items-center justify-center"><div id="mr-inline-qr" class="w-full"></div></div>
+              <div id="mr-inline-qr-status" class="text-[11px] opacity-80">Scannez et entrez le mot de passe AdminLGE</div>
+            </div>
             <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
               <div class="flex items-center justify-between text-xs uppercase tracking-wider font-bold opacity-80">
-                <span>Catégorie (15 questions)</span>
+                <span>Catégorie du quiz (15 questions)</span>
                 <span id="mr-vote-hint" class="text-indigo-300"></span>
               </div>
               <div id="mr-cats" class="flex flex-col gap-1.5"></div>
             </div>
-            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2.5">
-              <div class="text-xs uppercase tracking-wider font-bold opacity-80">🔐 Sécurité &amp; Utilisateurs</div>
-              <button id="mr-lock-btn" class="w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left bg-emerald-600/80">🔒 Blocage page (LGE) : ACTIVÉ</button>
-              <select id="mr-pwd-user" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
-                <option value="LGE">Modifier mot de passe : LGE</option>
-                <option value="AdminLGE">Modifier mot de passe : AdminLGE</option>
-              </select>
-              <div class="flex gap-2">
-                <input id="mr-pwd-val" type="password" placeholder="Nouveau mot de passe" class="flex-1 rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs text-white outline-none" />
-                <button id="mr-pwd-save" class="bg-indigo-600 active:scale-95 rounded-xl px-3 py-2 text-xs font-bold">💾 OK</button>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-wider font-bold opacity-80">📸 Photobooth (Synchro TV)</span>
+                <button id="mr-pb-refresh" class="text-xs bg-white/10 hover:bg-white/20 active:scale-95 rounded-lg px-2.5 py-1 font-bold">🔄 Actualiser</button>
               </div>
-              <div id="mr-pwd-fb" class="text-[11px] min-h-[1rem]"></div>
+              <button id="mr-pb-toggle" class="w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left transition bg-emerald-600/80">👁️ Photobooth : Affiché</button>
+              <select id="mr-pb-store-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-sm font-bold text-white outline-none"></select>
+              <div class="grid grid-cols-2 gap-2">
+                <select id="mr-pb-speed-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-2 text-xs font-semibold text-white outline-none">
+                  <option value="2">Vitesse : Rapide (2s/photo)</option>
+                  <option value="4">Vitesse : Normale (4s/photo)</option>
+                  <option value="6">Vitesse : Douce (6s/photo)</option>
+                  <option value="10">Vitesse : Lente (10s/photo)</option>
+                </select>
+                <select id="mr-pb-order-select" class="rounded-xl bg-slate-800 border border-white/15 px-2.5 py-2 text-xs font-semibold text-white outline-none">
+                  <option value="asc">Ordre : Chronologique</option>
+                  <option value="desc">Ordre : Récentes d'abord</option>
+                </select>
+              </div>
+              <div id="mr-pb-status" class="text-[11px] opacity-75"></div>
+              <button id="mr-pb-manage" class="text-xs bg-white/10 hover:bg-white/20 active:scale-95 rounded-xl px-3 py-2 font-bold text-left">🔗 Gérer les 7 magasins / Ajouter un lieu</button>
+              <div id="mr-pb-manage-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
+                <div id="mr-pb-stores-editor" class="flex flex-col gap-2"></div>
+                <div class="border-t border-white/10 pt-2 flex flex-col gap-1.5">
+                  <div class="text-[11px] uppercase opacity-70 font-bold">Ajouter un magasin</div>
+                  <input id="mr-pb-new-name" placeholder="Nom du magasin" class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+                  <input id="mr-pb-new-url" placeholder="https://www.simplebooth.com/gallery/..." class="w-full rounded-lg bg-slate-800 border border-white/15 px-2.5 py-1.5 text-xs text-white outline-none" />
+                  <div class="flex gap-2">
+                    <button id="mr-pb-add-store" class="flex-1 bg-indigo-600 active:scale-95 rounded-lg py-1.5 text-xs font-bold">➕ Ajouter</button>
+                    <button id="mr-pb-save-stores" class="flex-1 bg-emerald-600 active:scale-95 rounded-lg py-1.5 text-xs font-bold">💾 Enregistrer</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <span class="text-xs uppercase tracking-wider font-bold opacity-80">📊 Stats Google Drive</span>
                 <div class="flex gap-1.5">
-                  <a href="https://docs.google.com/spreadsheets/d/1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI/edit?gid=0#gid=0" target="_blank" rel="noopener" class="text-[11px] bg-emerald-600/80 rounded-lg px-2 py-1 font-bold">📄 Sheet</a>
+                  <a href="https://docs.google.com/spreadsheets/d/1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI/edit?gid=0#gid=0" target="_blank" rel="noopener" class="text-[11px] bg-emerald-600/80 rounded-lg px-2 py-1 font-bold">📄 Ouvrir Sheet</a>
                   <a href="/api/stats/csv" download="laser-quiz-stats.csv" class="text-[11px] bg-white/10 rounded-lg px-2 py-1 font-bold">📥 CSV</a>
                 </div>
               </div>
-              <input id="mr-webhook" placeholder="URL Webhook Apps Script (/exec)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs text-white outline-none" />
+              <input id="mr-webhook" placeholder="URL Webhook Apps Script (https://script.google.com/.../exec)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs text-white outline-none" />
               <div class="flex gap-2">
-                <button id="mr-sheets-save" class="flex-1 bg-indigo-600 rounded-xl py-2 text-xs font-bold">💾 Activer</button>
-                <button id="mr-sheets-test" class="flex-1 bg-amber-500 text-slate-950 rounded-xl py-2 text-xs font-bold">🧪 Tester</button>
+                <button id="mr-sheets-save" class="flex-1 bg-indigo-600 active:scale-95 rounded-xl py-2 text-xs font-bold">💾 Activer</button>
+                <button id="mr-sheets-test" class="flex-1 bg-amber-500 text-slate-950 active:scale-95 rounded-xl py-2 text-xs font-bold">🧪 Tester</button>
               </div>
               <div id="mr-sheets-status" class="text-[11px] opacity-80"></div>
+            </div>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2.5">
+              <div class="text-xs uppercase tracking-wider font-bold opacity-80">🔐 Sécurité &amp; Utilisateurs</div>
+              <button id="mr-lock-btn" class="w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left bg-emerald-600/80">🔒 Blocage page (LGE) : ACTIVÉ</button>
+              <button id="mr-pwd-toggle" class="w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left bg-white/10 hover:bg-white/20">🔑 Modifier mots de passe (LGE / AdminLGE)</button>
+              <div id="mr-pwd-panel" class="hidden bg-slate-950/70 border border-white/10 rounded-xl p-2.5 flex flex-col gap-2">
+                <select id="mr-pwd-user" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
+                  <option value="LGE">Utilisateur : LGE (Page Quiz)</option>
+                  <option value="AdminLGE">Utilisateur : AdminLGE (Régie)</option>
+                </select>
+                <input id="mr-pwd-val" type="password" placeholder="Nouveau mot de passe (min. 4 car.)" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs text-white outline-none" />
+                <button id="mr-pwd-save" class="w-full bg-indigo-600 active:scale-95 rounded-xl py-2 text-xs font-bold">💾 Changer le mot de passe</button>
+                <div id="mr-pwd-fb" class="text-[11px] min-h-[1rem]"></div>
+              </div>
             </div>
             <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
               <div class="text-xs uppercase tracking-wider font-bold opacity-80">👥 Joueurs en salle <span id="mr-pcount" class="text-amber-300"></span></div>
               <div id="mr-players" class="flex flex-col gap-1.5"></div>
             </div>
           </main>
+          <footer class="shrink-0 px-4 py-2.5 border-t border-white/10 bg-slate-950/90 flex gap-2">
+            <button id="mr-up-bot" class="flex-1 bg-white/15 active:scale-95 rounded-xl py-2 text-xs font-bold">⬆️ Monter</button>
+            <button id="mr-down-bot" class="flex-1 bg-white/15 active:scale-95 rounded-xl py-2 text-xs font-bold">⬇️ Descendre</button>
+          </footer>
         </div>`;
+
+      function scrollMobileRegie(delta) {
+        const body = $("mr-body");
+        if (!body) return;
+        try { body.scrollBy({ top: delta, behavior: "smooth" }); } catch (_) { body.scrollTop += delta; }
+      }
+      $("mr-up-top").onclick = () => scrollMobileRegie(-240);
+      $("mr-down-top").onclick = () => scrollMobileRegie(240);
+      $("mr-up-bot").onclick = () => scrollMobileRegie(-240);
+      $("mr-down-bot").onclick = () => scrollMobileRegie(240);
 
       function sendTv(type, extra = {}) {
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type, ...extra }));
       }
+      function pushMobilePbConfig(extra = {}) {
+        sendTv("SET_PHOTOBOOTH_CONFIG", {
+          store: mPbSelectedStore,
+          opts: mPbOpts,
+          stores: mPbStores,
+          ...extra,
+        });
+      }
+      function syncMobilePbControls() {
+        const btn = $("mr-pb-toggle");
+        if (btn) {
+          btn.textContent = mPbOpts.enabled ? "👁️ Photobooth : Affiché" : "🙈 Photobooth : Masqué";
+          btn.className = `w-full rounded-xl px-3 py-2.5 text-xs font-bold text-left transition ${
+            mPbOpts.enabled ? "bg-emerald-600/80" : "bg-slate-700 text-white/80"
+          }`;
+        }
+        const sel = $("mr-pb-store-select");
+        if (sel) {
+          sel.innerHTML = mPbStores.map(s => `<option value="${esc(s.name)}" ${s.name === mPbSelectedStore ? "selected" : ""}>${esc(s.name)}</option>`).join("");
+        }
+        if ($("mr-pb-speed-select")) $("mr-pb-speed-select").value = String(mPbOpts.speedSec);
+        if ($("mr-pb-order-select")) $("mr-pb-order-select").value = mPbOpts.order;
+        setText("mr-pb-status", `Magasin actif sur TV : ${mPbSelectedStore} · ${mPbOpts.order === "asc" ? "Chronologique" : "Récentes d'abord"}`);
+      }
+      function renderMobileStoresEditor() {
+        const box = $("mr-pb-stores-editor");
+        if (!box) return;
+        box.innerHTML = mPbStores.map((s, idx) => `
+          <div class="bg-white/5 rounded-lg p-2 flex flex-col gap-1">
+            <div class="flex items-center gap-1">
+              <input data-idx="${idx}" data-field="name" value="${esc(s.name)}" class="mr-pb-edit-input flex-1 rounded bg-slate-800 border border-white/10 px-2 py-1 text-xs font-bold text-white outline-none" />
+              ${mPbStores.length > 1 ? `<button data-del="${idx}" title="Supprimer" class="mr-pb-del-btn text-xs px-1.5 py-1 rounded bg-rose-600/70">🗑️</button>` : ""}
+            </div>
+            <input data-idx="${idx}" data-field="url" value="${esc(s.url)}" class="mr-pb-edit-input w-full rounded bg-slate-800 border border-white/10 px-2 py-1 text-[11px] text-amber-200 outline-none" />
+          </div>`).join("");
+        box.querySelectorAll(".mr-pb-del-btn").forEach(btn => {
+          btn.onclick = () => {
+            const idx = Number(btn.dataset.del);
+            mPbStores.splice(idx, 1);
+            if (!mPbStores.some(x => x.name === mPbSelectedStore)) {
+              mPbSelectedStore = mPbStores[0].name;
+            }
+            syncMobilePbControls();
+            renderMobileStoresEditor();
+            pushMobilePbConfig({ refresh: true });
+          };
+        });
+      }
+      syncMobilePbControls();
+
       function connectRegieWs() {
         ws = new WebSocket(`${WS_BASE}/ws/tv?room=${encodeURIComponent(roomCode)}`);
         ws.onopen = () => setText("mregie-conn", "🟢 Connecté");
@@ -2326,10 +2505,92 @@
       $("mr-next").onclick = () => sendTv("NEXT");
       $("mr-speed").onclick = () => sendTv("TOGGLE_SPEED");
       $("mr-vote").onclick = () => sendTv("TOGGLE_VOTE");
+      $("mr-mobile").onclick = () => { if (roomCode) window.open(`${window.location.origin}/?room=${encodeURIComponent(roomCode)}`, "_blank"); };
       $("mr-test-game").onclick = () => sendTv("START_TEST_GAME");
       $("mr-test-lobby").onclick = () => sendTv("TEST_GAME_LOBBY");
       $("mr-test-stop").onclick = () => sendTv("STOP_TEST_GAME");
+      $("mr-btn-qr").onclick = async () => {
+        const box = $("mr-qr-box");
+        box.classList.toggle("hidden");
+        if (!box.classList.contains("hidden")) {
+          const qbox = $("mr-inline-qr");
+          qbox.innerHTML = `<div class="text-xs text-slate-600 font-bold py-6 text-center">QR…</div>`;
+          try {
+            const res = await fetch("/api/auth/pair-create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ room: roomCode, target: "regie" }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+              qbox.innerHTML = "";
+              const authUrl = `${window.location.origin}/?tv_auth=${encodeURIComponent(data.pair_code)}&target=regie`;
+              new QRCode(qbox, { text: authUrl, width: 256, height: 256, colorDark: "#1e1b4b", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.M });
+            }
+          } catch (_) {}
+        }
+      };
+      $("mr-pb-refresh").onclick = () => {
+        sendTv("REFRESH_PHOTOBOOTH");
+        setText("mr-pb-status", `Actualisation demandée sur la TV (${mPbSelectedStore})…`);
+      };
+      $("mr-pb-toggle").onclick = () => {
+        mPbOpts.enabled = !mPbOpts.enabled;
+        syncMobilePbControls();
+        pushMobilePbConfig();
+      };
+      $("mr-pb-store-select").onchange = (e) => {
+        mPbSelectedStore = e.target.value;
+        syncMobilePbControls();
+        pushMobilePbConfig();
+      };
+      $("mr-pb-speed-select").onchange = (e) => {
+        mPbOpts.speedSec = Number(e.target.value) || 4;
+        syncMobilePbControls();
+        pushMobilePbConfig();
+      };
+      $("mr-pb-order-select").onchange = (e) => {
+        mPbOpts.order = e.target.value === "desc" ? "desc" : "asc";
+        syncMobilePbControls();
+        pushMobilePbConfig();
+      };
+      $("mr-pb-manage").onclick = () => {
+        const panel = $("mr-pb-manage-panel");
+        panel.classList.toggle("hidden");
+        if (!panel.classList.contains("hidden")) renderMobileStoresEditor();
+      };
+      $("mr-pb-add-store").onclick = () => {
+        const name = ($("mr-pb-new-name").value || "").trim();
+        const url = ($("mr-pb-new-url").value || "").trim();
+        if (!name || !url) return;
+        mPbStores.push({ name, url });
+        mPbSelectedStore = name;
+        $("mr-pb-new-name").value = "";
+        $("mr-pb-new-url").value = "";
+        syncMobilePbControls();
+        renderMobileStoresEditor();
+        pushMobilePbConfig({ refresh: true });
+      };
+      $("mr-pb-save-stores").onclick = () => {
+        document.querySelectorAll(".mr-pb-edit-input").forEach(inp => {
+          const idx = Number(inp.dataset.idx);
+          const field = inp.dataset.field;
+          if (mPbStores[idx]) mPbStores[idx][field] = inp.value.trim();
+        });
+        mPbStores = mPbStores.filter(s => s.name && s.url);
+        if (!mPbStores.length) mPbStores = DEFAULT_STORES.map(s => ({ ...s }));
+        if (!mPbStores.some(s => s.name === mPbSelectedStore)) {
+          mPbSelectedStore = mPbStores[0].name;
+        }
+        syncMobilePbControls();
+        renderMobileStoresEditor();
+        pushMobilePbConfig({ refresh: true });
+      };
       $("mr-lock-btn").onclick = () => sendTv("TOGGLE_PAGE_LOCK");
+      $("mr-pwd-toggle").onclick = () => {
+        $("mr-pwd-panel").classList.toggle("hidden");
+        setText("mr-pwd-fb", "");
+      };
       $("mr-sheets-save").onclick = () => sendTv("SET_SHEETS_WEBHOOK", { webhook_url: ($("mr-webhook").value || "").trim() });
       $("mr-sheets-test").onclick = () => { setText("mr-sheets-status", "Test en cours…"); sendTv("TEST_SHEETS_PUSH"); };
       $("mr-pwd-save").onclick = async () => {
@@ -2353,9 +2614,36 @@
         if (!s) return;
         setText("mregie-phase", s.phase);
         setText("mregie-timer", fmt(s.timer));
-        setText("mr-speed", `⚡ ${s.speed}x`);
-        setText("mr-vote", `🗳️ ${s.voting_enabled ? "ON" : "OFF"}`);
-        setText("mr-vote-hint", s.voting_enabled ? "Vote actif" : "Régie");
+        setText("mr-speed", `⚡ Vitesse : ${s.speed}x`);
+        setText("mr-vote", `🗳️ Vote : ${s.voting_enabled ? "ON" : "OFF"}`);
+        setText("mr-vote-hint", s.voting_enabled ? "🗳️ Vote joueurs actif" : "Sélection régie");
+
+        if (s.pb_config) {
+          const pbc = s.pb_config;
+          const pbcKey = JSON.stringify({
+            store: pbc.store,
+            opts: pbc.opts,
+            stores: pbc.stores,
+          });
+          if (pbcKey !== mPbConfigKey) {
+            mPbConfigKey = pbcKey;
+            if (Array.isArray(pbc.stores) && pbc.stores.length) {
+              mPbStores = pbc.stores.map(x => ({ name: x.name, url: x.url }));
+            }
+            if (pbc.store && mPbStores.some(x => x.name === pbc.store)) {
+              mPbSelectedStore = pbc.store;
+            }
+            if (pbc.opts && typeof pbc.opts === "object") {
+              mPbOpts = {
+                enabled: pbc.opts.enabled !== false,
+                speedSec: Number(pbc.opts.speedSec) || 4,
+                order: pbc.opts.order === "desc" ? "desc" : "asc",
+              };
+            }
+            syncMobilePbControls();
+            if (!$("mr-pb-manage-panel").classList.contains("hidden")) renderMobileStoresEditor();
+          }
+        }
 
         const mBotsCount = s.bots_count || 0;
         const mHasBots = mBotsCount > 0;
