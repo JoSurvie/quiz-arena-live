@@ -469,7 +469,7 @@ class Room:
         self.players: dict[str, Player] = {}
         self.tvs: set[WebSocket] = set()
         self.cat_index = 0
-        self.voting_enabled = False
+        self.voting_enabled = True
         self.played_categories: set[str] = set()
         self.last_game_players: set[str] = set()
         self.active_difficulty = "standard"

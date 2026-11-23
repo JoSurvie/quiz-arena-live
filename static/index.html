@@ -214,7 +214,7 @@
     let pbStatusText = "Chargement…";
     let pbTrackKey = "";
     let regieCatsKey = "";
-    let lastPlayersKey = "";
+    let lastPlayersKey = "__INIT__";
     let lastCatsStateKey = "";
     let lastDiffKey = "";
     let lastRegieOpen = false;
@@ -307,7 +307,7 @@
             <div class="text-lg sm:text-2xl xl:text-3xl font-black tracking-tight">Laser <span class="text-amber-300">Quiz</span></div>
             <span id="live" class="text-[10px] sm:text-xs font-bold bg-rose-600 px-2 py-0.5 rounded-full">● LIVE</span>
             <span id="speed-badge" class="hidden text-[10px] sm:text-xs font-bold bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full">⚡ 5x</span>
-            <span id="vote-badge" class="hidden text-[10px] sm:text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
+            <span id="vote-badge" class="text-[10px] sm:text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
             <span id="diff-badge" class="text-[10px] sm:text-xs font-bold bg-white/15 px-2.5 py-0.5 rounded-full"></span>
           </div>
           <div id="mini-qr-wrap" class="hidden items-center gap-2.5 sm:gap-3 bg-white/10 rounded-2xl p-1 sm:p-1.5 pr-3.5 sm:pr-5">
@@ -332,7 +332,7 @@
           <div class="grid grid-cols-2 gap-2">
             <button id="btn-next" class="bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 py-2 text-sm font-bold text-left">⏭️ Étape suivante</button>
             <button id="btn-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl px-3 py-2 text-sm font-bold text-left">⚡ Vitesse : 1x</button>
-            <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-3 py-2 text-sm font-bold text-left">🗳️ Vote : OFF</button>
+            <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-3 py-2 text-sm font-bold text-left">🗳️ Vote : ON</button>
             <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 text-sm font-bold text-left">📱 Vue Mobile</button>
           </div>
           <div class="bg-amber-500/10 border border-amber-400/30 rounded-xl p-2.5 flex flex-col gap-2">
@@ -1148,25 +1148,26 @@
       const main = $("tv-main");
       const s = state;
       const cats = s.categories || [];
-      lastPlayersKey = "";
+      lastPlayersKey = "__INIT__";
       lastCatsStateKey = "";
       lastDiffKey = "";
       if (s.phase === "LOBBY") {
+        const hasPlayers = (s.players || []).length > 0;
         main.innerHTML = `
           <div class="h-full flex flex-col justify-between overflow-hidden">
-            <div class="flex-1 min-h-0 grid md:grid-cols-2 gap-3 lg:gap-8 px-4 sm:px-8 lg:px-10 pt-1 pb-0.5 items-stretch overflow-hidden">
-              <div class="flex flex-col items-center justify-center text-center pop h-full min-h-0 gap-2 sm:gap-3">
-                <h2 class="cta-breathe text-[clamp(1.65rem,4.6vh,3.4rem)] font-black tracking-tight text-amber-300 leading-none">Scannez pour jouer !</h2>
+            <div id="lobby-grid" class="flex-1 min-h-0 grid ${hasPlayers ? "md:grid-cols-2" : "grid-cols-1"} gap-3 lg:gap-8 px-4 sm:px-8 lg:px-10 pt-1 pb-0.5 items-stretch overflow-hidden">
+              <div class="flex flex-col items-center justify-center text-center pop h-full min-h-0 ${hasPlayers ? "gap-2 sm:gap-3" : "gap-3 sm:gap-4"}">
+                <h2 id="lobby-cta" class="cta-breathe ${hasPlayers ? "text-[clamp(1.65rem,4.6vh,3.4rem)]" : "text-[clamp(2.3rem,6.4vh,4.8rem)]"} font-black tracking-tight text-amber-300 leading-none">Scannez pour jouer !</h2>
                 <div class="flex flex-wrap justify-center gap-1.5 sm:gap-2">
-                  <div class="inline-flex items-center gap-1.5 bg-amber-400/20 border border-amber-300/40 rounded-full px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-bold text-amber-200">
+                  <div class="inline-flex items-center gap-1.5 bg-amber-400/20 border border-amber-300/40 rounded-full px-3 sm:px-4 py-0.5 sm:py-1 text-xs sm:text-sm lg:text-base font-bold text-amber-200">
                     <span>Thème :</span>
                     <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
                   </div>
-                  <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-bold"></div>
+                  <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 sm:px-4 py-0.5 sm:py-1 text-xs sm:text-sm lg:text-base font-bold"></div>
                 </div>
-                <div class="bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-2xl w-[clamp(120px,24vh,235px)]"><div id="big-qr"></div></div>
+                <div id="big-qr-wrap" class="bg-white p-2.5 sm:p-3.5 rounded-2xl sm:rounded-3xl shadow-2xl ${hasPlayers ? "w-[clamp(120px,24vh,235px)]" : "w-[clamp(155px,30vh,295px)]"}"><div id="big-qr"></div></div>
               </div>
-              <div class="flex flex-col h-full min-h-0 py-1 gap-2">
+              <div id="lobby-players-col" class="${hasPlayers ? "flex" : "hidden"} flex-col h-full min-h-0 py-1 gap-2">
                 <div class="flex flex-wrap items-center justify-between gap-2 bg-white/10 border border-white/10 rounded-2xl px-4 sm:px-5 py-2 sm:py-3 shrink-0">
                   <h2 class="text-xl sm:text-3xl font-bold">Joueurs <span id="player-count" class="text-amber-300"></span></h2>
                   <div class="text-right flex items-baseline gap-2 sm:gap-3">
@@ -1590,6 +1591,25 @@
       const playersKey = s.players.map(p => `${p.id}:${p.name}:${p.avatar}:${p.connected ? 1 : 0}:${p.beginner ? 1 : 0}:${p.missed_streak || 0}`).join("|");
       if (playersKey !== lastPlayersKey) {
         lastPlayersKey = playersKey;
+        const hasPlayers = s.players.length > 0;
+        const lobbyGrid = $("lobby-grid");
+        if (lobbyGrid) {
+          lobbyGrid.classList.toggle("md:grid-cols-2", hasPlayers);
+          lobbyGrid.classList.toggle("grid-cols-1", !hasPlayers);
+        }
+        const lobbyPlayersCol = $("lobby-players-col");
+        if (lobbyPlayersCol) {
+          lobbyPlayersCol.classList.toggle("hidden", !hasPlayers);
+          lobbyPlayersCol.classList.toggle("flex", hasPlayers);
+        }
+        const lobbyCta = $("lobby-cta");
+        if (lobbyCta) {
+          lobbyCta.className = `cta-breathe ${hasPlayers ? "text-[clamp(1.65rem,4.6vh,3.4rem)]" : "text-[clamp(2.3rem,6.4vh,4.8rem)]"} font-black tracking-tight text-amber-300 leading-none`;
+        }
+        const bigQrWrap = $("big-qr-wrap");
+        if (bigQrWrap) {
+          bigQrWrap.className = `bg-white p-2.5 sm:p-3.5 rounded-2xl sm:rounded-3xl shadow-2xl ${hasPlayers ? "w-[clamp(120px,24vh,235px)]" : "w-[clamp(155px,30vh,295px)]"}`;
+        }
         const list = $("player-list");
         if (list) {
           setText("player-count", `(${s.players.length})`);
@@ -2319,7 +2339,7 @@
             <div class="grid grid-cols-2 gap-2">
               <button id="mr-next" class="bg-indigo-600 hover:bg-indigo-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">⏭️ Étape suivante</button>
               <button id="mr-speed" class="bg-amber-500 hover:bg-amber-400 text-slate-900 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">⚡ Vitesse : 1x</button>
-              <button id="mr-vote" class="bg-violet-600 hover:bg-violet-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">🗳️ Vote : OFF</button>
+              <button id="mr-vote" class="bg-violet-600 hover:bg-violet-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">🗳️ Vote : ON</button>
               <button id="mr-mobile" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">📱 Vue Mobile</button>
             </div>
             <div class="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-3 flex flex-col gap-2">
