@@ -15,7 +15,9 @@
 | [static/index.html](static/index.html) | Interface SPA unique (TV, Mobile Joueur & Régie Staff) | Routage automatique par URL (`?tv_auth=...` -> `initStaffAuth()`, `?room=XXXXX` -> `initPlayer()`, sinon `initTV()`). Stack CDN : Tailwind CSS (`https://cdn.tailwindcss.com`), QRCode.js (`1.0.0`), `canvas-confetti` (`1.9.3`) |
 | [questions.json](questions.json) | Banque de questions structurée | **300 questions uniques** : 5 catégories de base × 2 niveaux (`standard` et `debutant`) × 30 questions |
 | [google_sheets_webhook.gs](google_sheets_webhook.gs) | Script Google Apps Script (Webhook Drive) | À coller dans *Extensions → Apps Script* du Google Sheet cible (`1ZJ-sDjjC74DrQmhNJDXOargA7OH-4HJJ2ecenpQX0sI`) pour recevoir et mettre à jour les 6 colonnes KPI automatiquement |
-| [requirements.txt](requirements.txt) | Dépendances Python | `fastapi==0.115.0`, `uvicorn[standard]==0.30.6`, `websockets==13.1` |
+| [requirements.txt](requirements.txt) | Dépendances Python | `fastapi==0.165.0`, `uvicorn[standard]==0.54.0`, `websockets==17.4` |
+| [.github/dependabot.yml](.github/dependabot.yml) | Mises à jour automatisées des dépendances | Vérification hebdomadaire (`pip` et `github-actions`, lundis 08h00 `America/Toronto`) ciblant `merge-photobooth` |
+| [.github/workflows/security.yml](.github/workflows/security.yml) | Audit de vulnérabilités & sécurité CI | GitHub Actions : `pip-audit` (CVE Python), `bandit` (analyse statique de sécurité sur `server.py`) et `py_compile` |
 | [.gitignore](.gitignore) | Exclusions Git | `__pycache__/`, `*.py[cod]`, `.venv/`, `venv/`, `.env`, `.DS_Store` |
 
 ### Routage d'interface & Branding
@@ -330,6 +332,11 @@ uvicorn server:app --host 0.0.0.0 --port 8000
   - `GOOGLE_SHEETS_WEBHOOK_URL` = URL `/exec` de la Web App déployée depuis [google_sheets_webhook.gs](google_sheets_webhook.gs)
   - Optionnelles : `LGE_DEFAULT_PASSWORD` (`LGE2026`), `ADMIN_DEFAULT_PASSWORD` (`Admin2026!`), `LGE_AUTH_SECRET`
 
-### Synchronisation GitHub (`JoSurvie/quiz-arena-live`)
-- La branche contenant toutes les évolutions (Photobooth, 300 questions, Gamification, Anti-AFK, Mix Aléatoire, Optimisations Samsung TV, Export KPI Google Sheets, Auth `LGE`/`AdminLGE`) est **`merge-photobooth`**.
+### Synchronisation GitHub (`JoSurvie/quiz-arena-live`) & Sécurité (Dependabot / CI)
+- La branche contenant toutes les évolutions (Photobooth, 300 questions, Gamification, Anti-AFK, Mix Aléatoire, Optimisations Samsung TV, Export KPI Google Sheets, Auth `LGE`/`AdminLGE`, Dependabot & Audit de vulnérabilités) est **`merge-photobooth`**.
 - Vérifier avant tout déploiement Render que la branche déployée pointe bien sur `merge-photobooth` (ou fusionner `merge-photobooth` dans `main`).
+- **Dependabot ([.github/dependabot.yml](.github/dependabot.yml))** : ouvre automatiquement des Pull Requests hebdomadaires (chaque lundi à 08h00 `America/Toronto`) sur `merge-photobooth` pour les dépendances Python (`pip` / `requirements.txt`, avec regroupement des mises à jour mineures/patch) et les workflows GitHub Actions (`github-actions`).
+- **Vérification automatisée des vulnérabilités ([.github/workflows/security.yml](.github/workflows/security.yml))** : exécutée à chaque `push` ou `pull_request` sur `main` / `merge-photobooth`, chaque lundi à 12h00 UTC et à la demande (`workflow_dispatch`) :
+  1. `dependency-audit` : scanne `requirements.txt` contre la base OSV/PyPI via `pip-audit -r requirements.txt --strict --desc on`.
+  2. `code-scan` : analyse statique de sécurité SAST sur `server.py` via `bandit -r server.py -ll -ii` (sévérité et confiance Moyenne/Haute).
+  3. `compile-check` : validation syntaxique via `python -m py_compile server.py`.

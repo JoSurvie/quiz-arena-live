@@ -276,6 +276,8 @@ def _record_game_history(payload: dict[str, Any]) -> None:
 
 
 def _push_sheets_sync(webhook_url: str, payload: dict[str, Any]) -> tuple[bool, str]:
+    if not webhook_url.startswith(("https://", "http://")):
+        return False, "Schéma URL invalide"
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         webhook_url,
@@ -284,7 +286,7 @@ def _push_sheets_sync(webhook_url: str, payload: dict[str, Any]) -> tuple[bool, 
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
             status = getattr(resp, "status", 200)
             raw = resp.read().decode("utf-8", errors="replace").strip()
             if status >= 400:
@@ -1314,6 +1316,8 @@ def extract_gallery_code(url_or_code: str) -> str | None:
 
 
 def _http_get_text(url: str, accept: str = "application/hal+json, application/json") -> str:
+    if not url.startswith(("https://", "http://")):
+        raise ValueError("Schéma URL non autorisé.")
     req = urllib.request.Request(
         url,
         headers={
@@ -1321,7 +1325,7 @@ def _http_get_text(url: str, accept: str = "application/hal+json, application/js
             "Accept": accept,
         },
     )
-    with urllib.request.urlopen(req, timeout=12) as resp:
+    with urllib.request.urlopen(req, timeout=12) as resp:  # nosec B310
         return resp.read().decode("utf-8", errors="replace")
 
 
@@ -1462,7 +1466,7 @@ def _fetch_logo_bytes() -> bytes:
         LOGO_REMOTE_URL,
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
         return resp.read()
 
 
