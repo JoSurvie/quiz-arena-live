@@ -324,6 +324,23 @@
             <button id="btn-vote" class="bg-violet-600 hover:bg-violet-500 rounded-xl px-3 py-2 text-sm font-bold text-left">🗳️ Vote : OFF</button>
             <button id="btn-mobile" class="bg-emerald-600 hover:bg-emerald-500 rounded-xl px-3 py-2 text-sm font-bold text-left">📱 Vue Mobile</button>
           </div>
+          <div class="bg-amber-500/10 border border-amber-400/30 rounded-xl p-2.5 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-wider font-extrabold text-amber-300">🤖 Mode Partie Test</span>
+              <span id="regie-bots-badge" class="text-[11px] font-bold text-amber-200"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button id="btn-test-game" class="col-span-2 bg-gradient-to-r from-amber-400 to-orange-400 hover:from-amber-300 hover:to-orange-300 text-slate-950 rounded-xl px-3 py-2 text-xs font-black text-center shadow transition active:scale-95">
+                🤖 Partie test (8 bots)
+              </button>
+              <button id="btn-test-lobby" class="hidden bg-indigo-600/80 hover:bg-indigo-600 rounded-xl px-2.5 py-1.5 text-xs font-bold text-center transition active:scale-95">
+                🏠 Lobby (8 bots)
+              </button>
+              <button id="btn-test-stop" class="hidden bg-rose-600/80 hover:bg-rose-600 rounded-xl px-2.5 py-1.5 text-xs font-bold text-center transition active:scale-95">
+                🧹 Retirer les bots
+              </button>
+            </div>
+          </div>
           <button id="btn-mobile-regie-qr" class="w-full bg-indigo-600/80 hover:bg-indigo-600 rounded-xl px-3 py-2 text-xs font-bold text-left">📱 Ouvrir la Régie sur mon cellulaire (QR)</button>
           <div id="regie-mobile-qr-box" class="hidden bg-slate-950/80 border border-white/15 rounded-xl p-3 flex flex-col items-center gap-2 text-center">
             <div class="bg-white p-2 rounded-xl w-36 h-36 mx-auto flex items-center justify-center"><div id="regie-inline-qr" class="w-full"></div></div>
@@ -536,6 +553,9 @@
     $("btn-speed").onclick = () => send("TOGGLE_SPEED");
     $("btn-vote").onclick = () => send("TOGGLE_VOTE");
     $("btn-mobile").onclick = () => { if (roomCode) window.open(joinUrl(), "_blank"); };
+    $("btn-test-game").onclick = () => send("START_TEST_GAME");
+    $("btn-test-lobby").onclick = () => send("TEST_GAME_LOBBY");
+    $("btn-test-stop").onclick = () => send("STOP_TEST_GAME");
     $("btn-pwd-toggle").onclick = () => {
       $("pwd-manage-panel").classList.toggle("hidden");
       setText("pwd-feedback", "");
@@ -1359,6 +1379,19 @@
       const voteBadge = $("vote-badge");
       if (voteBadge && voteBadge.classList.contains("hidden") !== !voting) {
         voteBadge.classList.toggle("hidden", !voting);
+      }
+
+      const botsCount = s.bots_count || 0;
+      const hasBots = botsCount > 0;
+      setText("regie-bots-badge", hasBots ? `${botsCount} bots actifs` : "Inactif");
+      setText("btn-test-game", hasBots ? "🔄 Relancer Partie test (8 bots)" : "🤖 Partie test (8 bots)");
+      const btnTestLobby = $("btn-test-lobby");
+      if (btnTestLobby && btnTestLobby.classList.contains("hidden") !== !hasBots) {
+        btnTestLobby.classList.toggle("hidden", !hasBots);
+      }
+      const btnTestStop = $("btn-test-stop");
+      if (btnTestStop && btnTestStop.classList.contains("hidden") !== !hasBots) {
+        btnTestStop.classList.toggle("hidden", !hasBots);
       }
 
       const pushSt = s.last_push_status || {};
@@ -2202,6 +2235,23 @@
               <button id="mr-speed" class="bg-amber-500 text-slate-950 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">⚡ 1x</button>
               <button id="mr-vote" class="bg-violet-600 active:scale-95 rounded-2xl p-3 text-xs font-black text-center">🗳️ OFF</button>
             </div>
+            <div class="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-3 flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-wider font-extrabold text-amber-300">🤖 Mode Partie Test</span>
+                <span id="mr-bots-badge" class="text-[11px] font-bold text-amber-200"></span>
+              </div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button id="mr-test-game" class="col-span-2 bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 active:scale-95 rounded-xl py-2.5 px-3 text-xs font-black text-center shadow">
+                  🤖 Partie test (8 bots)
+                </button>
+                <button id="mr-test-lobby" class="hidden bg-indigo-600 active:scale-95 rounded-xl py-2 px-2.5 text-xs font-bold text-center">
+                  🏠 Lobby (8 bots)
+                </button>
+                <button id="mr-test-stop" class="hidden bg-rose-600 active:scale-95 rounded-xl py-2 px-2.5 text-xs font-bold text-center">
+                  🧹 Retirer les bots
+                </button>
+              </div>
+            </div>
             <div class="bg-white/10 border border-white/15 rounded-2xl p-3.5 flex flex-col gap-2">
               <div class="flex items-center justify-between text-xs uppercase tracking-wider font-bold opacity-80">
                 <span>Catégorie (15 questions)</span>
@@ -2264,6 +2314,9 @@
       $("mr-next").onclick = () => sendTv("NEXT");
       $("mr-speed").onclick = () => sendTv("TOGGLE_SPEED");
       $("mr-vote").onclick = () => sendTv("TOGGLE_VOTE");
+      $("mr-test-game").onclick = () => sendTv("START_TEST_GAME");
+      $("mr-test-lobby").onclick = () => sendTv("TEST_GAME_LOBBY");
+      $("mr-test-stop").onclick = () => sendTv("STOP_TEST_GAME");
       $("mr-lock-btn").onclick = () => sendTv("TOGGLE_PAGE_LOCK");
       $("mr-sheets-save").onclick = () => sendTv("SET_SHEETS_WEBHOOK", { webhook_url: ($("mr-webhook").value || "").trim() });
       $("mr-sheets-test").onclick = () => { setText("mr-sheets-status", "Test en cours…"); sendTv("TEST_SHEETS_PUSH"); };
@@ -2291,6 +2344,13 @@
         setText("mr-speed", `⚡ ${s.speed}x`);
         setText("mr-vote", `🗳️ ${s.voting_enabled ? "ON" : "OFF"}`);
         setText("mr-vote-hint", s.voting_enabled ? "Vote actif" : "Régie");
+
+        const mBotsCount = s.bots_count || 0;
+        const mHasBots = mBotsCount > 0;
+        setText("mr-bots-badge", mHasBots ? `${mBotsCount} bots actifs` : "Inactif");
+        setText("mr-test-game", mHasBots ? "🔄 Relancer Partie test (8 bots)" : "🤖 Partie test (8 bots)");
+        $("mr-test-lobby").classList.toggle("hidden", !mHasBots);
+        $("mr-test-stop").classList.toggle("hidden", !mHasBots);
 
         const lockBtn = $("mr-lock-btn");
         const lockKey = String(!!s.page_lock_enabled);

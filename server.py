@@ -381,13 +381,29 @@ for _diff in ("standard", "debutant"):
 # --------------------------------------------------------------------------- #
 # Modèle de jeu
 # --------------------------------------------------------------------------- #
+TEST_BOT_PROFILES: list[tuple[str, str, float, bool]] = [
+    ("Bot LaserMax", "🤖", 0.84, False),
+    ("Bot Nova", "🦊", 0.76, False),
+    ("Bot Astro", "🚀", 0.70, False),
+    ("Bot Pixel", "👾", 0.64, True),
+    ("Bot Turbo", "⚡", 0.58, False),
+    ("Bot Panda", "🐼", 0.52, True),
+    ("Bot Comète", "☄️", 0.45, False),
+    ("Bot Cactus", "🌵", 0.38, True),
+]
+
+
 class Player:
-    def __init__(self, player_id: str):
+    def __init__(self, player_id: str, is_bot: bool = False):
         self.id = player_id
         self.name = ""
         self.avatar = "🙂"
         self.score = 0
         self.ws: WebSocket | None = None
+        self.is_bot = is_bot
+        self.bot_accuracy = 0.65
+        self.bot_planned_choice: int | None = None
+        self.bot_answer_at = 0.0
         self.answer: int | None = None
         self.answer_remaining = 0.0
         self.last_points = 0
@@ -406,9 +422,15 @@ class Player:
     def joined(self) -> bool:
         return bool(self.name)
 
+    @property
+    def is_connected(self) -> bool:
+        return self.ws is not None or self.is_bot
+
     def reset_round(self) -> None:
         self.answer = None
         self.answer_remaining = 0.0
+        self.bot_planned_choice = None
+        self.bot_answer_at = 0.0
 
     def reset_stats(self) -> None:
         self.score = 0
@@ -507,7 +529,7 @@ class Room:
         return max(0.0, min(float(QUESTION_DURATION), self.timer - elapsed))
 
     def all_answered(self) -> bool:
-        active = [p for p in self.joined_players() if p.ws is not None]
+        active = [p for p in self.joined_players() if p.is_connected]
         return bool(active) and all(p.answer is not None for p in active)
 
     def available_categories(self) -> list[str]:
@@ -518,7 +540,7 @@ class Room:
         avail = set(self.available_categories())
         counts = {c: 0 for c in CATEGORIES}
         for p in self.joined_players():
-            if p.ws is not None and p.vote_category in avail:
+            if p.is_connected and p.vote_category in avail:
                 counts[p.vote_category] += 1
         return counts
 
@@ -535,7 +557,7 @@ class Room:
         return best_cat
 
     def beginner_stats(self) -> tuple[int, int, bool]:
-        active = [p for p in self.joined_players() if p.ws is not None]
+        active = [p for p in self.joined_players() if p.is_connected]
         total = len(active)
         beginners = sum(1 for p in active if p.beginner)
         is_beginner = total > 0 and (beginners / total) > 0.5
@@ -545,7 +567,7 @@ class Room:
         if self.phase not in ("LOBBY", "PODIUM"):
             return
         if self.last_game_players:
-            active_ids = {p.id for p in self.joined_players() if p.ws is not None}
+            active_ids = {p.id for p in self.joined_players() if p.is_connected}
             not_replaying = len(self.last_game_players - active_ids)
             if not_replaying >= len(self.last_game_players) / 2:
                 self.played_categories.clear()
@@ -568,12 +590,125 @@ class Room:
         if self.category not in avail:
             self.cat_index = CATEGORIES.index(avail[0])
 
+    # ----- bots de partie test --------------------------------------------- #
+    def assign_bot_votes(self) -> None:
+        avail = self.available_categories()
+        if not avail:
+            return
+        for idx, p in enumerate(self.players.values()):
+            if p.is_bot and p.joined:
+                p.vote_category = avail[idx % len(avail)]
+
+    def spawn_test_bots(self) -> None:
+        avail = self.available_categories()
+        for idx, (b_name, b_avatar, b_acc, b_beg) in enumerate(TEST_BOT_PROFILES, start=1):
+            pid = f"bot_{idx}"
+            bot = self.players.get(pid)
+            if bot is None:
+                bot = Player(pid, is_bot=True)
+                self.players[pid] = bot
+            bot.is_bot = True
+            bot.name = b_name
+            bot.avatar = b_avatar
+            bot.bot_accuracy = b_acc
+            bot.beginner = b_beg
+            bot.disconnected_at = None
+            bot.missed_streak = 0
+            if avail:
+                bot.vote_category = avail[(idx - 1) % len(avail)]
+            self.register_player_in_game(bot)
+        self.refresh_category_locks()
+        self.apply_votes()
+
+    def remove_test_bots(self) -> bool:
+        bot_ids = [pid for pid, p in self.players.items() if p.is_bot]
+        if not bot_ids:
+            return False
+        for pid in bot_ids:
+            self.mark_player_left_game(pid)
+            self.players.pop(pid, None)
+            self.game_player_stats.pop(pid, None)
+        self.refresh_category_locks()
+        self.apply_votes()
+        self.check_empty_active_game()
+        return True
+
+    def plan_bots_for_question(self) -> None:
+        q = self.current_question()
+        if q is None:
+            return
+        correct_ans = int(q["answer"])
+        wrong_choices = [i for i in range(4) if i != correct_ans]
+        bots = [p for p in self.joined_players() if p.is_bot]
+        if not bots:
+            return
+        # Échelonne les temps de réponse entre ~18.5s et ~3.5s restantes pour
+        # laisser le temps d'observer l'écran QUESTION tout en simulant du vrai jeu.
+        time_slots = [
+            round(SYS_RNG.uniform(16.5, 18.8), 2),
+            round(SYS_RNG.uniform(14.0, 16.4), 2),
+            round(SYS_RNG.uniform(12.0, 13.9), 2),
+            round(SYS_RNG.uniform(10.0, 11.9), 2),
+            round(SYS_RNG.uniform(8.0, 9.9), 2),
+            round(SYS_RNG.uniform(6.0, 7.9), 2),
+            round(SYS_RNG.uniform(4.2, 5.9), 2),
+            round(SYS_RNG.uniform(1.6, 3.8), 2),
+        ]
+        SYS_RNG.shuffle(time_slots)
+        for idx, bot in enumerate(bots):
+            bot.answer = None
+            bot.answer_remaining = 0.0
+            if SYS_RNG.random() <= bot.bot_accuracy:
+                bot.bot_planned_choice = correct_ans
+            else:
+                bot.bot_planned_choice = SYS_RNG.choice(wrong_choices)
+            bot.bot_answer_at = time_slots[idx % len(time_slots)]
+
+    def tick_bots(self) -> None:
+        if self.phase != "QUESTION":
+            return
+        if self.current_question() is None:
+            return
+        for bot in self.joined_players():
+            if not bot.is_bot or bot.answer is not None:
+                continue
+            if bot.bot_planned_choice is None:
+                self.plan_bots_for_question()
+            if self.timer <= bot.bot_answer_at and bot.bot_planned_choice is not None:
+                bot.answer = bot.bot_planned_choice
+                jitter = SYS_RNG.uniform(-0.15, 0.15)
+                bot.answer_remaining = round(
+                    max(0.2, min(float(QUESTION_DURATION - 0.15), bot.bot_answer_at + jitter)),
+                    2,
+                )
+                bot.missed_streak = 0
+        if self.all_answered():
+            self.reveal()
+
+    def ensure_bots_answered(self) -> None:
+        if self.current_question() is None:
+            return
+        for bot in self.joined_players():
+            if not bot.is_bot or bot.answer is not None:
+                continue
+            if bot.bot_planned_choice is None:
+                self.plan_bots_for_question()
+            if bot.bot_planned_choice is not None:
+                bot.answer = bot.bot_planned_choice
+                bot.answer_remaining = round(
+                    max(0.2, min(float(QUESTION_DURATION - 0.15), bot.bot_answer_at or 10.0)),
+                    2,
+                )
+                bot.missed_streak = 0
+
     # ----- transitions ----------------------------------------------------- #
     def set_phase(self, phase: str, duration: int) -> None:
         self.phase = phase
         self.duration = duration
         self.timer = duration
         self.last_tick = time.monotonic()
+        if phase == "QUESTION":
+            self.plan_bots_for_question()
 
     def _draw_questions(self, pool: list[dict[str, Any]], k: int) -> list[dict[str, Any]]:
         unseen = [q for q in pool if q["q"] not in self.seen_questions]
@@ -687,6 +822,10 @@ class Room:
     def finalize_and_push_stats(self) -> dict[str, Any] | None:
         if not self.current_game_id or not self.game_player_stats:
             return None
+        has_human = any(not p.is_bot for p in self.joined_players())
+        if not has_human:
+            self.game_logged = True
+            return None
         if self.game_ended_at is None:
             self.game_ended_at = time.monotonic()
         if not self.game_timestamp_str:
@@ -711,7 +850,7 @@ class Room:
         self.fastest_record = None
         self.round_events = []
         self.played_categories.add(self.category)
-        self.last_game_players = {p.id for p in self.joined_players() if p.ws is not None}
+        self.last_game_players = {p.id for p in self.joined_players() if p.is_connected}
         self.game_had_players = bool(self.joined_players())
         now_mono = time.monotonic()
         self.current_game_id = f"{self.code}-{int(time.time() * 1000)}"
@@ -769,7 +908,7 @@ class Room:
             else DISCONNECT_GRACE_GAME
         )
         for pid, p in list(self.players.items()):
-            if p.ws is None:
+            if not p.is_connected:
                 if not p.joined:
                     self.players.pop(pid, None)
                     changed = True
@@ -842,6 +981,7 @@ class Room:
         }
 
     def reveal(self) -> None:
+        self.ensure_bots_answered()
         q = self.current_question()
         prev_board = self.leaderboard()
         prev_ranks = {p.id: idx + 1 for idx, p in enumerate(prev_board)}
@@ -932,7 +1072,7 @@ class Room:
             else:
                 p.last_points = 0
                 p.last_correct = False
-                if p.answer is not None or p.ws is not None:
+                if p.answer is not None or p.is_connected:
                     p.wrong_streak += 1
                     p.correct_streak = 0
                     if p.wrong_streak >= 5 and p.wrong_streak % 5 == 0:
@@ -1066,12 +1206,13 @@ class Room:
         self.game_shares_count = 0
         self.game_logged = False
         for pid, p in list(self.players.items()):
-            if p.ws is None:
+            if not p.is_connected:
                 self.players.pop(pid, None)
             else:
                 p.reset_stats()
         self.set_phase("LOBBY", LOBBY_DURATION)
         self.refresh_category_locks()
+        self.assign_bot_votes()
         self.apply_votes()
 
     def advance(self) -> None:
@@ -1117,7 +1258,8 @@ class Room:
             "name": p.name,
             "avatar": p.avatar,
             "score": p.score,
-            "connected": p.ws is not None,
+            "connected": p.is_connected,
+            "is_bot": p.is_bot,
             "answered": p.answer is not None,
             "last_points": p.last_points,
             "last_correct": p.last_correct,
@@ -1177,6 +1319,7 @@ class Room:
             "fastest_record": self.fastest_record,
             "best_streak_record": self.best_streak_record(),
             "answered_count": sum(1 for p in joined if p.answer is not None),
+            "bots_count": sum(1 for p in joined if p.is_bot),
             "players": [self._public_player(p) for p in joined],
             "leaderboard": [self._public_player(p) for p in self.leaderboard()],
             "sheets_webhook_set": bool(get_sheets_webhook_url()),
@@ -1295,6 +1438,7 @@ async def game_clock_loop(room: Room) -> None:
             room.prune_inactive_players()
             room.timer -= 1
             room.last_tick = time.monotonic()
+            room.tick_bots()
             if room.timer <= 0:
                 room.on_timer_expired()
             await room.broadcast()
@@ -1864,6 +2008,18 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                 if current.kick_player(
                     target_id, "Tu as été retiré de la salle par la régie."
                 ):
+                    await current.broadcast()
+            elif cmd == "START_TEST_GAME":
+                current.spawn_test_bots()
+                current.start_game()
+                await current.broadcast()
+            elif cmd == "TEST_GAME_LOBBY":
+                current.spawn_test_bots()
+                if current.phase != "LOBBY":
+                    current.back_to_lobby()
+                await current.broadcast()
+            elif cmd == "STOP_TEST_GAME":
+                if current.remove_test_bots():
                     await current.broadcast()
             elif cmd == "TOGGLE_PAGE_LOCK":
                 AUTH_STATE["page_lock_enabled"] = not bool(AUTH_STATE.get("page_lock_enabled", True))
