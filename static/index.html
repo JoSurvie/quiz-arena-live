@@ -299,9 +299,9 @@
             <span id="vote-badge" class="hidden text-[10px] sm:text-xs font-bold bg-indigo-500 text-white px-2.5 py-0.5 rounded-full">🗳️ Vote actif</span>
             <span id="diff-badge" class="text-[10px] sm:text-xs font-bold bg-white/15 px-2.5 py-0.5 rounded-full"></span>
           </div>
-          <div id="mini-qr-wrap" class="hidden items-center gap-2 sm:gap-2.5 bg-white/10 rounded-2xl p-1 sm:p-1.5 pr-2.5 sm:pr-3.5">
+          <div id="mini-qr-wrap" class="hidden items-center gap-2.5 sm:gap-3 bg-white/10 rounded-2xl p-1 sm:p-1.5 pr-3.5 sm:pr-5">
             <div class="bg-white p-1 rounded-xl w-11 sm:w-14 lg:w-16 shrink-0"><div id="mini-qr"></div></div>
-            <div class="text-xs sm:text-sm font-extrabold text-amber-300 leading-tight max-w-[7rem]">Rejoins la partie !</div>
+            <div class="cta-breathe whitespace-nowrap text-xs sm:text-sm lg:text-base font-black text-amber-300 leading-none">Rejoins la partie !</div>
           </div>
         </header>
         <main id="tv-main" class="flex-1 min-h-0 overflow-hidden"></main>
@@ -1197,23 +1197,33 @@
         const choicePlayers = s.choice_players || [[], [], [], []];
         const total = Math.max(1, choicePlayers.reduce((a, b) => a + b.length, 0));
         const evs = s.round_events || [];
+        const shownEvs = evs.slice(0, 4);
         const fastRec = s.fastest_record;
         main.innerHTML = `
           <div class="h-full flex flex-col px-4 sm:px-6 pb-2 gap-1.5 sm:gap-2 overflow-hidden">
-            <div class="shrink-0 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-base lg:text-lg">
-              <span class="bg-white/15 rounded-full px-3 sm:px-4 py-0.5 sm:py-1 font-bold">${catIcon(s.question.category)} ${esc(s.question.category)}</span>
-              <span class="opacity-80">Question <b>${s.q_index + 1}</b> / ${s.q_total}</span>
-              <span class="opacity-80">Suite dans <b id="timer"></b> s</span>
+            <div class="shrink-0 flex items-center justify-between gap-3 sm:gap-6 bg-white/10 border border-white/10 rounded-2xl px-3.5 sm:px-5 py-1.5 sm:py-2">
+              <h1 class="flex-1 min-w-0 text-[clamp(0.95rem,2.4vh,1.75rem)] font-extrabold leading-snug text-left">
+                <span class="mr-1.5">${catIcon(s.question.category)}</span>${esc(s.question.q)}
+              </h1>
+              <div class="shrink-0 flex items-center gap-3 sm:gap-5 text-xs sm:text-sm lg:text-base whitespace-nowrap">
+                <span class="opacity-85">Question <b>${s.q_index + 1}</b> / ${s.q_total}</span>
+                <span class="bg-white/10 rounded-full px-2.5 sm:px-3.5 py-0.5 sm:py-1">Suite dans <b id="timer" class="text-amber-300"></b> s</span>
+              </div>
             </div>
-            <h1 class="shrink-0 text-[clamp(1.05rem,3vh,2.25rem)] font-extrabold text-center leading-tight">${esc(s.question.q)}</h1>
-            ${evs.length ? `
-              <div id="gamification-banner" class="shrink-0 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 max-h-[12vh] overflow-hidden">
-                ${evs.slice(0, 4).map(ev => `
-                  <div class="${eventCardClass(ev.kind)} rounded-xl sm:rounded-2xl px-2.5 sm:px-3.5 py-1 sm:py-1.5 shadow-xl flex items-center gap-2">
-                    <span class="text-xl sm:text-2xl">${esc(ev.icon)}</span>
-                    <div class="leading-tight">
-                      <div class="text-[10px] sm:text-xs font-black uppercase tracking-wider">${esc(ev.title)}</div>
-                      <div class="text-xs font-bold">${esc(ev.avatar)} ${esc(ev.name)} — <span class="font-normal opacity-95">${esc(ev.subtitle)}</span></div>
+            ${shownEvs.length ? `
+              <div id="gamification-banner" class="shrink-0 grid ${
+                shownEvs.length === 1 ? "grid-cols-1 max-w-xl mx-auto"
+                : shownEvs.length === 2 ? "grid-cols-1 sm:grid-cols-2 max-w-4xl mx-auto"
+                : shownEvs.length === 3 ? "grid-cols-1 sm:grid-cols-3"
+                : "grid-cols-2 lg:grid-cols-4"
+              } w-full gap-1.5 sm:gap-2.5">
+                ${shownEvs.map(ev => `
+                  <div class="${eventCardClass(ev.kind)} rounded-xl sm:rounded-2xl px-2.5 sm:px-3.5 py-1 sm:py-1.5 shadow-xl flex items-center gap-2 min-w-0">
+                    <span class="text-[clamp(1.25rem,2.8vh,2rem)] shrink-0 leading-none">${esc(ev.icon)}</span>
+                    <div class="min-w-0 flex-1 leading-tight">
+                      <div class="text-[clamp(0.65rem,1.35vh,0.82rem)] font-black uppercase tracking-wider truncate">${esc(ev.title)}</div>
+                      <div class="text-[clamp(0.7rem,1.45vh,0.88rem)] font-bold truncate">${esc(ev.avatar)} ${esc(ev.name)}</div>
+                      <div class="text-[clamp(0.62rem,1.25vh,0.78rem)] font-normal opacity-95 truncate">${esc(ev.subtitle)}</div>
                     </div>
                   </div>`).join("")}
               </div>` : ""}
@@ -1230,7 +1240,7 @@
                       <span class="text-xl sm:text-2xl font-black shrink-0">${ok ? "✔" : ""}</span>
                     </div>
                     <div class="flex flex-wrap gap-1 min-h-[1.25rem] overflow-hidden">
-                      ${voters.length ? voters.slice(0, 6).map(v => `
+                      ${voters.length ? voters.slice(0, 8).map(v => `
                         <span class="inline-flex items-center gap-1 bg-slate-950/65 border border-white/20 rounded-full px-2 py-0.5 text-[11px] sm:text-xs font-bold shadow">
                           <span>${esc(v.avatar)}</span>
                           <span>${esc(v.name)}</span>
@@ -1243,30 +1253,32 @@
                   </div>`;
                 }).join("")}
               </div>
-              <div class="bg-white/10 rounded-2xl sm:rounded-3xl p-3 sm:p-4 flex flex-col justify-between h-full min-h-0 overflow-y-auto">
-                <div>
-                  <h3 class="text-base sm:text-xl font-bold mb-1.5">🏅 Classement</h3>
-                  ${s.leaderboard.length ? s.leaderboard.slice(0, 8).map((p, i) => {
-                    const streakChip = p.correct_streak >= 15 ? `<span class="text-xs font-black bg-amber-300 text-slate-950 rounded-full px-2 py-0.5 anim-flame">👑15</span>`
-                      : p.correct_streak >= 10 ? `<span class="text-xs font-black bg-fuchsia-500 text-white rounded-full px-2 py-0.5 anim-flame">⚡${p.correct_streak}</span>`
-                      : p.correct_streak >= 3 ? `<span class="text-xs font-black bg-orange-500 text-white rounded-full px-2 py-0.5 ${p.correct_streak >= 5 ? "anim-flame" : ""}">🔥${p.correct_streak}</span>`
-                      : p.wrong_streak >= 5 ? `<span class="text-xs font-black bg-cyan-600 text-white rounded-full px-2 py-0.5 anim-ice">🧊${p.wrong_streak}</span>` : "";
-                    return `
-                    <div class="flex items-center gap-1.5 sm:gap-2 py-1 border-b border-white/10 pop">
-                      <span class="w-5 sm:w-6 text-sm sm:text-base font-black text-amber-300">${i + 1}</span>
-                      <span class="text-lg sm:text-xl">${esc(p.avatar)}</span>
-                      <span class="flex-1 text-sm sm:text-base font-semibold truncate">${esc(p.name)}</span>
-                      ${streakChip}
-                      <span class="text-xs ${p.last_correct ? "text-emerald-300" : "text-rose-300"}">${p.last_correct ? "+" + p.last_points : "+0"}</span>
-                      <span class="text-sm sm:text-base font-bold w-12 sm:w-14 text-right">${p.score}</span>
-                    </div>`;
-                  }).join("") : `<div class="opacity-60">Aucun joueur</div>`}
+              <div class="bg-white/10 rounded-2xl sm:rounded-3xl p-2.5 sm:p-3.5 flex flex-col justify-between h-full min-h-0 overflow-hidden">
+                <div class="min-h-0 flex-1 flex flex-col">
+                  <h3 class="text-sm sm:text-lg font-bold mb-1 shrink-0">🏅 Classement</h3>
+                  <div class="flex-1 min-h-0 flex flex-col justify-evenly">
+                    ${s.leaderboard.length ? s.leaderboard.slice(0, 8).map((p, i) => {
+                      const streakChip = p.correct_streak >= 15 ? `<span class="text-[10px] sm:text-xs font-black bg-amber-300 text-slate-950 rounded-full px-1.5 py-0.5 anim-flame">👑15</span>`
+                        : p.correct_streak >= 10 ? `<span class="text-[10px] sm:text-xs font-black bg-fuchsia-500 text-white rounded-full px-1.5 py-0.5 anim-flame">⚡${p.correct_streak}</span>`
+                        : p.correct_streak >= 3 ? `<span class="text-[10px] sm:text-xs font-black bg-orange-500 text-white rounded-full px-1.5 py-0.5 ${p.correct_streak >= 5 ? "anim-flame" : ""}">🔥${p.correct_streak}</span>`
+                        : p.wrong_streak >= 5 ? `<span class="text-[10px] sm:text-xs font-black bg-cyan-600 text-white rounded-full px-1.5 py-0.5 anim-ice">🧊${p.wrong_streak}</span>` : "";
+                      return `
+                      <div class="flex items-center gap-1.5 sm:gap-2 py-[clamp(1px,0.35vh,4px)] border-b border-white/10 pop min-h-0">
+                        <span class="w-4 sm:w-5 text-xs sm:text-sm font-black text-amber-300">${i + 1}</span>
+                        <span class="text-base sm:text-lg leading-none">${esc(p.avatar)}</span>
+                        <span class="flex-1 text-xs sm:text-sm font-semibold truncate">${esc(p.name)}</span>
+                        ${streakChip}
+                        <span class="text-[11px] sm:text-xs ${p.last_correct ? "text-emerald-300" : "text-rose-300"}">${p.last_correct ? "+" + p.last_points : "+0"}</span>
+                        <span class="text-xs sm:text-sm font-bold w-11 sm:w-13 text-right">${p.score}</span>
+                      </div>`;
+                    }).join("") : `<div class="opacity-60">Aucun joueur</div>`}
+                  </div>
                 </div>
                 ${fastRec ? `
-                  <div class="mt-2 bg-indigo-950/60 border border-cyan-300/35 rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs sm:text-sm shrink-0">
-                    <span class="text-xl">🚀</span>
+                  <div class="mt-1.5 bg-indigo-950/60 border border-cyan-300/35 rounded-xl px-2.5 py-1 flex items-center gap-2 text-xs shrink-0">
+                    <span class="text-base sm:text-lg">🚀</span>
                     <div class="leading-tight flex-1 truncate">
-                      <div class="text-[10px] uppercase tracking-wider text-cyan-200 font-bold">Record de vitesse</div>
+                      <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-cyan-200 font-bold">Record de vitesse</div>
                       <div class="font-bold truncate">${esc(fastRec.avatar)} ${esc(fastRec.name)} · <span class="text-amber-300">${Number(fastRec.time).toFixed(2)}s</span></div>
                     </div>
                   </div>` : ""}
