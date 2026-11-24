@@ -2241,7 +2241,7 @@
             <div class="text-3xl font-black">${ok ? (en ? "Correct answer!" : "Bonne réponse !") : (noAnswer ? (en ? "Time's up!" : "Temps écoulé !") : (en ? "Wrong answer!" : "Raté !"))}</div>
             <div class="text-5xl font-black">+${s.last_points}</div>
             ${streakChip}
-            ${myEvents.length ? `<div class="flex flex-wrap justify-center gap-1.5">${myEvents.map(ev => `<span class="bg-black/30 border border-white/25 rounded-full px-3 py-1 text-xs font-bold anim-event">${esc(ev.icon)} ${esc(ev.title)}</span>`).join("")}</div>` : ""}
+            ${myEvents.length ? `<div class="flex flex-wrap justify-center gap-1.5">${myEvents.map(ev => `<span class="bg-black/30 border border-white/25 rounded-full px-3 py-1 text-xs font-bold anim-event">${esc(ev.icon)} ${esc(en && ev.title_en ? ev.title_en : ev.title)}</span>`).join("")}</div>` : ""}
             ${ans !== null ? `<div class="flex items-center gap-3 bg-black/20 rounded-2xl px-4 py-3">
               <span class="${COLORS[ans]} w-12 h-12 rounded-xl flex items-center justify-center text-3xl">${SHAPES[ans]}</span>
               <span class="text-left font-semibold">${esc(s.question.options[ans])}</span></div>` : ""}
@@ -2301,7 +2301,7 @@
               <div class="w-full bg-white/10 rounded-2xl p-2.5 flex flex-wrap justify-center gap-1.5">
                 ${s.my_best_streak >= 2 ? `<span class="bg-orange-500/30 border border-orange-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🔥 ${en ? "Max streak:" : "Série max :"} ${s.my_best_streak}</span>` : ""}
                 ${s.my_fastest_time ? `<span class="bg-cyan-500/25 border border-cyan-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🚀 ${en ? "Fastest:" : "Plus rapide :"} ${Number(s.my_fastest_time).toFixed(2)}s</span>` : ""}
-                ${badges.map(b => `<span class="bg-amber-400/20 border border-amber-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">${esc(b.icon)} ${esc(b.label)}</span>`).join("")}
+                ${badges.map(b => `<span class="bg-amber-400/20 border border-amber-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">${esc(b.icon)} ${esc(en && b.label_en ? b.label_en : b.label)}</span>`).join("")}
               </div>` : ""}
             <div class="w-full bg-white/10 rounded-2xl p-3 text-left">
               ${s.top3.map((p, i) => `<div class="flex items-center gap-3 py-1"><span>${["🥇", "🥈", "🥉"][i]}</span><span class="text-2xl">${esc(p.avatar)}</span><span class="flex-1 truncate font-semibold">${esc(p.name)}</span><b>${p.score}</b></div>`).join("")}
@@ -2364,7 +2364,7 @@
             ctx.fillText("LASER QUIZ", 540, 212);
             ctx.fillStyle = "#fcd34d";
             ctx.font = "700 32px system-ui, sans-serif";
-            ctx.fillText(`${catIcon(s.category)} ${s.category} · ${s.difficulty === "debutant" ? "Débutant" : "Standard"}`, 540, 266);
+            ctx.fillText(`${catIcon(s.category)} ${catLabel(s.category, en)} · ${s.difficulty === "debutant" ? (en ? "Beginner" : "Débutant") : "Standard"}`, 540, 266);
 
             ctx.font = "155px system-ui, sans-serif";
             ctx.fillText(medal, 540, 465);
@@ -2378,7 +2378,7 @@
             ctx.fillText("LASER QUIZ", 540, 145);
             ctx.fillStyle = "#fcd34d";
             ctx.font = "700 32px system-ui, sans-serif";
-            ctx.fillText(`${catIcon(s.category)} ${s.category} · ${s.difficulty === "debutant" ? "Débutant" : "Standard"}`, 540, 210);
+            ctx.fillText(`${catIcon(s.category)} ${catLabel(s.category, en)} · ${s.difficulty === "debutant" ? (en ? "Beginner" : "Débutant") : "Standard"}`, 540, 210);
 
             ctx.font = "170px system-ui, sans-serif";
             ctx.fillText(medal, 540, 440);
@@ -2393,7 +2393,7 @@
           ctx.fillText(`${rankLabel}`, 540, 745);
           ctx.fillStyle = "rgba(255,255,255,0.75)";
           ctx.font = "600 38px system-ui, sans-serif";
-          ctx.fillText(`sur ${s.players_count} joueur(s)`, 540, 805);
+          ctx.fillText(en ? `out of ${s.players_count} player(s)` : `sur ${s.players_count} joueur(s)`, 540, 805);
 
           ctx.fillStyle = "rgba(255,255,255,0.12)";
           ctx.fillRect(190, 865, 700, 140);
@@ -2401,7 +2401,7 @@
           ctx.font = "900 76px system-ui, sans-serif";
           ctx.fillText(`${s.score} pts`, 540, 960);
 
-          const badgeLine = badges.slice(0, 4).map(b => `${b.icon} ${b.label}`).join("   ");
+          const badgeLine = badges.slice(0, 4).map(b => `${b.icon} ${en && b.label_en ? b.label_en : b.label}`).join("   ");
           ctx.fillStyle = "#a7f3d0";
           ctx.font = "700 32px system-ui, sans-serif";
           ctx.fillText(badgeLine || "Laser Game Evolution", 540, 1110);
@@ -2419,9 +2419,9 @@
           try {
             await navigator.clipboard.writeText(`${shareText} ${shareUrl}`);
             sendMsg({ type: "SHARE", channel: "copy" });
-            setText("share-feedback", "✅ Texte copié !");
+            setText("share-feedback", en ? "✅ Text copied!" : "✅ Texte copié !");
           } catch (_) {
-            setText("share-feedback", "Copie impossible sur cet appareil.");
+            setText("share-feedback", en ? "Copy unavailable on this device." : "Copie impossible sur cet appareil.");
           }
         };
         $("share-native").onclick = async () => {
@@ -2431,13 +2431,13 @@
             if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
               await navigator.share({ title: "Laser Quiz", text: shareText, files: [file] });
               sendMsg({ type: "SHARE", channel: "native" });
-              setText("share-feedback", "✅ Carte partagée !");
+              setText("share-feedback", en ? "✅ Card shared!" : "✅ Carte partagée !");
               return;
             }
             if (navigator.share) {
               await navigator.share({ title: "Laser Quiz", text: shareText, url: shareUrl });
               sendMsg({ type: "SHARE", channel: "native" });
-              setText("share-feedback", "✅ Score partagé !");
+              setText("share-feedback", en ? "✅ Score shared!" : "✅ Score partagé !");
               return;
             }
             if (blob) {
@@ -2446,7 +2446,7 @@
               a.download = "laser-quiz-score.png";
               a.click();
               sendMsg({ type: "SHARE", channel: "native" });
-              setText("share-feedback", "📥 Image téléchargée !");
+              setText("share-feedback", en ? "📥 Image downloaded!" : "📥 Image téléchargée !");
             }
           } catch (_) {}
         };

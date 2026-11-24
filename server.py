@@ -463,9 +463,14 @@ class Player:
         self.missed_streak = 0
         self.reset_round()
 
-    def award_badge(self, kind: str, icon: str, label: str) -> None:
+    def award_badge(self, kind: str, icon: str, label: str, label_en: str = "") -> None:
         if not any(b["kind"] == kind for b in self.badges):
-            self.badges.append({"kind": kind, "icon": icon, "label": label})
+            self.badges.append({
+                "kind": kind,
+                "icon": icon,
+                "label": label,
+                "label_en": label_en or label,
+            })
 
 
 class Room:
@@ -986,11 +991,15 @@ class Room:
         icon: str,
         p: Player,
         extra: str = "",
+        title_en: str = "",
+        subtitle_en: str = "",
     ) -> dict[str, Any]:
         return {
             "kind": kind,
             "title": title,
+            "title_en": title_en or title,
             "subtitle": subtitle,
+            "subtitle_en": subtitle_en or subtitle,
             "icon": icon,
             "player_id": p.id,
             "name": p.name,
@@ -1056,7 +1065,7 @@ class Room:
                 correct_players.append((p, elapsed))
 
                 if p.correct_streak == 15:
-                    p.award_badge("STREAK_15", "👑", "15 à la suite")
+                    p.award_badge("STREAK_15", "👑", "15 à la suite", "15 in a row")
                     self.round_events.append(
                         self._make_event(
                             "STREAK_15",
@@ -1065,10 +1074,12 @@ class Room:
                             "👑",
                             p,
                             "15/15",
+                            title_en="ABSOLUTE FLAWLESS!",
+                            subtitle_en="15 correct answers in a row!",
                         )
                     )
                 elif p.correct_streak == 10:
-                    p.award_badge("STREAK_10", "⚡", "10 à la suite")
+                    p.award_badge("STREAK_10", "⚡", "10 à la suite", "10 in a row")
                     self.round_events.append(
                         self._make_event(
                             "STREAK_10",
@@ -1077,10 +1088,12 @@ class Room:
                             "⚡",
                             p,
                             "10🔥",
+                            title_en="LEGENDARY STREAK!",
+                            subtitle_en="10 correct answers in a row!",
                         )
                     )
                 elif p.correct_streak == 5:
-                    p.award_badge("STREAK_5", "🔥", "5 à la suite")
+                    p.award_badge("STREAK_5", "🔥", "5 à la suite", "5 in a row")
                     self.round_events.append(
                         self._make_event(
                             "STREAK_5",
@@ -1089,10 +1102,12 @@ class Room:
                             "🔥",
                             p,
                             "5🔥",
+                            title_en="ON FIRE!",
+                            subtitle_en="5 correct answers in a row!",
                         )
                     )
                 if p.answer_remaining <= 2.0:
-                    p.award_badge("BUZZER_BEATER", "🍀", "Buzzer beater")
+                    p.award_badge("BUZZER_BEATER", "🍀", "Buzzer beater", "Buzzer beater")
                     self.round_events.append(
                         self._make_event(
                             "BUZZER_BEATER",
@@ -1100,6 +1115,8 @@ class Room:
                             f"Réponse juste à la dernière seconde ({elapsed:.2f}s) !",
                             "🍀",
                             p,
+                            title_en="SAVED BY THE BELL!",
+                            subtitle_en=f"Correct answer at the last second ({elapsed:.2f}s)!",
                         )
                     )
             else:
@@ -1109,7 +1126,7 @@ class Room:
                     p.wrong_streak += 1
                     p.correct_streak = 0
                     if p.wrong_streak >= 5 and p.wrong_streak % 5 == 0:
-                        p.award_badge("WRONG_5", "🧊", "5 faux d'affilée")
+                        p.award_badge("WRONG_5", "🧊", "5 faux d'affilée", "5 wrong in a row")
                         self.round_events.append(
                             self._make_event(
                                 "WRONG_5",
@@ -1118,6 +1135,8 @@ class Room:
                                 "🧊",
                                 p,
                                 f"{p.wrong_streak}❄️",
+                                title_en="COLD STREAK!",
+                                subtitle_en=f"{p.wrong_streak} wrong answers in a row… hang in there!",
                             )
                         )
 
@@ -1132,7 +1151,7 @@ class Room:
                     "time": fastest_t,
                     "q_index": self.q_index,
                 }
-                fastest_p.award_badge("FASTEST_RECORD", "🚀", f"Éclair {fastest_t:.2f}s")
+                fastest_p.award_badge("FASTEST_RECORD", "🚀", f"Éclair {fastest_t:.2f}s", f"Lightning {fastest_t:.2f}s")
                 self.round_events.append(
                     self._make_event(
                         "FASTEST_RECORD",
@@ -1141,6 +1160,8 @@ class Room:
                         "🚀",
                         fastest_p,
                         f"{fastest_t:.2f}s",
+                        title_en="SPEED RECORD!",
+                        subtitle_en=f"Fastest correct answer of the game ({fastest_t:.2f}s)!",
                     )
                 )
             elif len(correct_players) >= 2:
@@ -1152,12 +1173,14 @@ class Room:
                         "🎯",
                         fastest_p,
                         f"{fastest_t:.2f}s",
+                        title_en="FIRST BLOOD!",
+                        subtitle_en=f"Fastest on this question ({fastest_t:.2f}s)",
                     )
                 )
 
         if answered_count >= 2 and len(correct_players) == 1:
             lone = correct_players[0][0]
-            lone.award_badge("LONE_WOLF", "💀", "Seul contre tous")
+            lone.award_badge("LONE_WOLF", "💀", "Seul contre tous", "Lone wolf")
             self.round_events.append(
                 self._make_event(
                     "LONE_WOLF",
@@ -1165,6 +1188,8 @@ class Room:
                     "Unique bonne réponse de la salle !",
                     "💀",
                     lone,
+                    title_en="LONE WOLF!",
+                    subtitle_en="Only correct answer in the room!",
                 )
             )
 
@@ -1172,7 +1197,7 @@ class Room:
             new_board = self.leaderboard()
             if new_board and new_board[0].score > 0 and prev_leader_id and new_board[0].id != prev_leader_id:
                 leader = new_board[0]
-                leader.award_badge("NEW_LEADER", "🥇", "Prise de pouvoir")
+                leader.award_badge("NEW_LEADER", "🥇", "Prise de pouvoir", "New leader")
                 self.round_events.append(
                     self._make_event(
                         "NEW_LEADER",
@@ -1180,13 +1205,15 @@ class Room:
                         "Prend la 1re place du classement !",
                         "🥇",
                         leader,
+                        title_en="NEW LEADER!",
+                        subtitle_en="Takes 1st place on the leaderboard!",
                     )
                 )
             for idx, p in enumerate(new_board):
                 old_rank = prev_ranks.get(p.id)
                 if old_rank and (old_rank - (idx + 1)) >= 3 and p.last_correct:
                     gain = old_rank - (idx + 1)
-                    p.award_badge("COMEBACK", "🦅", "Remontada")
+                    p.award_badge("COMEBACK", "🦅", "Remontada", "Comeback")
                     self.round_events.append(
                         self._make_event(
                             "COMEBACK",
@@ -1194,6 +1221,8 @@ class Room:
                             f"+{gain} places gagnées sur ce tour !",
                             "🦅",
                             p,
+                            title_en="COMEBACK!",
+                            subtitle_en=f"+{gain} places gained this round!",
                         )
                     )
 
