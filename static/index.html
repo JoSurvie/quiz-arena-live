@@ -222,7 +222,16 @@
     "Sport & Gastronomie": "🏅",
     "Mix Aléatoire": "🎲"
   };
+  const CAT_LABELS_EN = {
+    "Histoire & Géographie": "History & Geography",
+    "Sciences & Nature": "Science & Nature",
+    "Cinéma & Pop Culture": "Movies & Pop Culture",
+    "Arts, Musique & Littérature": "Arts, Music & Literature",
+    "Sport & Gastronomie": "Sports & Food",
+    "Mix Aléatoire": "Random Mix"
+  };
   function catIcon(c) { return CAT_ICONS[c] || "🎯"; }
+  function catLabel(c, isEn = false) { return (isEn && CAT_LABELS_EN[c]) ? CAT_LABELS_EN[c] : (c || ""); }
   const app = document.getElementById("app");
   const params = new URLSearchParams(window.location.search);
   const ROOM_PARAM = (params.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5);
@@ -289,11 +298,12 @@
             order: parsed.order === "desc" ? "desc" : "asc",
             ctaAnim: ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(parsed.ctaAnim)
               ? parsed.ctaAnim
-              : "neon_zoom"
+              : "neon_zoom",
+            lobbyLang: parsed.lobbyLang === "en" ? "en" : "fr"
           };
         }
       } catch (_) {}
-      return { enabled: true, speedSec: 4, order: "asc", ctaAnim: "neon_zoom" };
+      return { enabled: true, speedSec: 4, order: "asc", ctaAnim: "neon_zoom", lobbyLang: "fr" };
     })();
     let pbSelectedStore = getCookie("lge_pb_store") || pbStores[0].name;
     if (!pbStores.some(s => s.name === pbSelectedStore)) pbSelectedStore = pbStores[0].name;
@@ -310,34 +320,66 @@
     let preloadToken = 0;
     let lastPbConfigKey = "";
     let lastPbRefreshSeq = 0;
-    const CTA_PHRASES = ["Scannez pour jouer !", "Défi tes amis !"];
+    const CTA_PHRASES_BY_LANG = {
+      fr: ["Scannez pour jouer !", "Défi tes amis !"],
+      en: ["Scan to play!", "Challenge your friends!"],
+    };
+    const MINI_CTA_BY_LANG = {
+      fr: "Rejoins la partie !",
+      en: "Join the game!",
+    };
     let ctaPhraseIdx = 0;
     let ctaInterval = null;
 
+    function getLobbyLang() {
+      return pbOpts.lobbyLang === "en" ? "en" : "fr";
+    }
+
+    function applyLobbyTranslations() {
+      const en = getLobbyLang() === "en";
+      setText("lobby-players-label", en ? "👥 Players" : "👥 Joueurs");
+      setText("lobby-starts-label", en ? "Starts in" : "Début dans");
+      setText("mini-qr-cta", MINI_CTA_BY_LANG[en ? "en" : "fr"]);
+    }
+
     function updateLobbyCtaElement(restartAnim = true) {
-      const el = $("lobby-cta");
-      if (!el) return;
-      const hasPlayers = !!(state && Array.isArray(state.players) && state.players.length > 0);
+      const lang = getLobbyLang();
+      const phrases = CTA_PHRASES_BY_LANG[lang] || CTA_PHRASES_BY_LANG.fr;
       const anim = ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(pbOpts.ctaAnim)
         ? pbOpts.ctaAnim
         : "neon_zoom";
-      const sizeCls = hasPlayers
-        ? "text-[clamp(1.6rem,4.8vh,3.6rem)]"
-        : "text-[clamp(2.1rem,6.8vh,5.1rem)]";
       const colorCls = ctaPhraseIdx === 0 ? "text-amber-300" : "text-cyan-300";
-      el.textContent = CTA_PHRASES[ctaPhraseIdx % CTA_PHRASES.length];
-      if (restartAnim) {
-        el.className = `${sizeCls} font-black tracking-tight ${colorCls} leading-tight`;
-        void el.offsetWidth;
+
+      const el = $("lobby-cta");
+      if (el) {
+        const hasPlayers = !!(state && Array.isArray(state.players) && state.players.length > 0);
+        const sizeCls = hasPlayers
+          ? "text-[clamp(1.6rem,4.8vh,3.6rem)]"
+          : "text-[clamp(2.1rem,6.8vh,5.1rem)]";
+        el.textContent = phrases[ctaPhraseIdx % phrases.length];
+        if (restartAnim) {
+          el.className = `${sizeCls} font-black tracking-tight ${colorCls} leading-tight`;
+          void el.offsetWidth;
+        }
+        el.className = `cta-anim-${anim} ${sizeCls} font-black tracking-tight ${colorCls} leading-tight`;
       }
-      el.className = `cta-anim-${anim} ${sizeCls} font-black tracking-tight ${colorCls} leading-tight`;
+
+      const miniEl = $("mini-qr-cta");
+      if (miniEl) {
+        miniEl.textContent = MINI_CTA_BY_LANG[lang] || MINI_CTA_BY_LANG.fr;
+        if (restartAnim) {
+          miniEl.className = `whitespace-nowrap text-xs sm:text-sm lg:text-base font-black ${colorCls} leading-none`;
+          void miniEl.offsetWidth;
+        }
+        miniEl.className = `cta-anim-${anim} whitespace-nowrap text-xs sm:text-sm lg:text-base font-black ${colorCls} leading-none`;
+      }
     }
 
     function ensureCtaLoop() {
       if (ctaInterval) return;
       ctaInterval = setInterval(() => {
-        if (!state || state.phase !== "LOBBY") return;
-        ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+        if (!state) return;
+        ctaPhraseIdx = (ctaPhraseIdx + 1) % 2;
         updateLobbyCtaElement(true);
       }, 3200);
     }
@@ -436,7 +478,7 @@
           </div>
           <div id="mini-qr-wrap" class="hidden items-center gap-2.5 sm:gap-3 bg-white/10 rounded-2xl p-1 sm:p-1.5 pr-3.5 sm:pr-5">
             <div class="bg-white p-1 rounded-xl w-11 sm:w-14 lg:w-16 shrink-0"><div id="mini-qr"></div></div>
-            <div class="cta-breathe whitespace-nowrap text-xs sm:text-sm lg:text-base font-black text-amber-300 leading-none">Rejoins la partie !</div>
+            <div id="mini-qr-cta" class="cta-anim-neon_zoom whitespace-nowrap text-xs sm:text-sm lg:text-base font-black text-amber-300 leading-none">Rejoins la partie !</div>
           </div>
         </header>
         <main id="tv-main" class="flex-1 min-h-0 overflow-hidden"></main>
@@ -478,9 +520,13 @@
           </div>
           <div class="bg-white/5 border border-white/15 rounded-xl p-2.5 flex flex-col gap-2">
             <div class="flex items-center justify-between">
-              <span class="text-xs uppercase tracking-wider font-extrabold text-cyan-300">✨ Animation Accroche Lobby</span>
+              <span class="text-xs uppercase tracking-wider font-extrabold text-cyan-300">✨ Lobby : Langue &amp; Animation</span>
               <button id="btn-cta-preview" class="text-[11px] bg-white/10 hover:bg-white/20 rounded-lg px-2 py-0.5 font-bold">🔄 Tester phrase</button>
             </div>
+            <select id="lobby-lang-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
+              <option value="fr">🇫🇷 Langue du Lobby : Français</option>
+              <option value="en">🇬🇧 Lobby Language : English</option>
+            </select>
             <select id="cta-anim-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
               <option value="neon_zoom">⚡ Zoom Élastique &amp; Néon</option>
               <option value="flip_3d">🔄 Flip 3D Arcade</option>
@@ -821,18 +867,27 @@
       $("pb-speed-select").value = String(pbOpts.speedSec);
       $("pb-order-select").value = pbOpts.order;
       if ($("cta-anim-select")) $("cta-anim-select").value = pbOpts.ctaAnim || "neon_zoom";
+      if ($("lobby-lang-select")) $("lobby-lang-select").value = pbOpts.lobbyLang === "en" ? "en" : "fr";
       applyPhotoboothVisibility();
+      applyLobbyTranslations();
       send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
     }
+    $("lobby-lang-select").onchange = (e) => {
+      pbOpts.lobbyLang = e.target.value === "en" ? "en" : "fr";
+      saveOptsCookie();
+      pushPhotoboothConfig();
+      applyLobbyTranslations();
+      updateLobbyCtaElement(true);
+    };
     $("cta-anim-select").onchange = (e) => {
       pbOpts.ctaAnim = e.target.value || "neon_zoom";
       saveOptsCookie();
       pushPhotoboothConfig();
-      ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+      ctaPhraseIdx = (ctaPhraseIdx + 1) % 2;
       updateLobbyCtaElement(true);
     };
     $("btn-cta-preview").onclick = () => {
-      ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+      ctaPhraseIdx = (ctaPhraseIdx + 1) % 2;
       updateLobbyCtaElement(true);
     };
     function renderStoresEditor() {
@@ -1313,23 +1368,26 @@
           try { bgVid.pause(); } catch (_) {}
         }
       }
+      ensureCtaLoop();
       if (s.phase === "LOBBY") {
         const hasPlayers = (s.players || []).length > 0;
+        const en = getLobbyLang() === "en";
+        const phrases = CTA_PHRASES_BY_LANG[en ? "en" : "fr"];
         main.innerHTML = `
           <div class="h-full flex flex-col justify-between overflow-hidden">
             <div id="lobby-grid" class="flex-1 min-h-0 flex flex-col items-center justify-center px-4 sm:px-8 lg:px-10 py-1 overflow-hidden">
               <div id="lobby-qr-block" class="flex flex-col items-center justify-center text-center pop shrink-0 ${hasPlayers ? "gap-[clamp(0.65rem,2.4vh,1.75rem)]" : "gap-[clamp(2rem,7vh,4.5rem)]"}">
                 <div class="min-h-[clamp(2.2rem,7vh,5.5rem)] flex items-center justify-center px-2">
-                  <h2 id="lobby-cta" class="font-black tracking-tight text-amber-300 leading-tight">${esc(CTA_PHRASES[ctaPhraseIdx % CTA_PHRASES.length])}</h2>
+                  <h2 id="lobby-cta" class="font-black tracking-tight text-amber-300 leading-tight">${esc(phrases[ctaPhraseIdx % phrases.length])}</h2>
                 </div>
                 <div id="big-qr-wrap" class="bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-2xl transition-all duration-300 ${hasPlayers ? "w-[clamp(88px,20.5vh,210px)]" : "w-[clamp(115px,28vh,295px)]"}"><div id="big-qr"></div></div>
               </div>
               <div id="lobby-players-col" class="${hasPlayers ? "flex" : "hidden"} flex-col items-center justify-center w-full max-w-6xl mx-auto mt-[clamp(0.5rem,1.8vh,1.25rem)] gap-1.5 sm:gap-2 shrink-0">
                 <div class="inline-flex items-center gap-3 sm:gap-4 bg-slate-950/70 border border-white/15 rounded-full px-4 sm:px-5 py-1 sm:py-1.5 shadow-lg shrink-0">
-                  <span class="text-xs sm:text-base lg:text-lg font-bold">👥 Joueurs <span id="player-count" class="text-amber-300"></span></span>
+                  <span class="text-xs sm:text-base lg:text-lg font-bold"><span id="lobby-players-label">${en ? "👥 Players" : "👥 Joueurs"}</span> <span id="player-count" class="text-amber-300"></span></span>
                   <span class="w-px h-3.5 sm:h-4 bg-white/20"></span>
                   <div class="flex items-baseline gap-1.5 sm:gap-2">
-                    <span class="text-[10px] sm:text-xs uppercase opacity-75">Début dans</span>
+                    <span id="lobby-starts-label" class="text-[10px] sm:text-xs uppercase opacity-75">${en ? "Starts in" : "Début dans"}</span>
                     <span id="timer" class="text-sm sm:text-xl lg:text-2xl font-black font-mono text-amber-300"></span>
                   </div>
                 </div>
@@ -1340,7 +1398,6 @@
               <div id="pb-strip" class="w-full h-full flex items-center overflow-hidden"></div>
             </section>
           </div>`;
-        ensureCtaLoop();
         updateLobbyCtaElement(true);
         pbTrackKey = "";
         renderPhotoboothStrip(true);
@@ -1572,9 +1629,12 @@
       }
       setText("btn-vote", `🗳️ Vote : ${voting ? "ON" : "OFF"}`);
       const voteBadge = $("vote-badge");
-      const hideVoteBadge = !voting || s.phase === "LOBBY";
-      if (voteBadge && voteBadge.classList.contains("hidden") !== hideVoteBadge) {
-        voteBadge.classList.toggle("hidden", hideVoteBadge);
+      if (voteBadge && !voteBadge.classList.contains("hidden")) {
+        voteBadge.classList.add("hidden");
+      }
+      const diffBadge = $("diff-badge");
+      if (diffBadge && !diffBadge.classList.contains("hidden")) {
+        diffBadge.classList.add("hidden");
       }
 
       const botsCount = s.bots_count || 0;
@@ -1632,16 +1692,19 @@
             const nextAnim = ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(pbc.opts.ctaAnim)
               ? pbc.opts.ctaAnim
               : "neon_zoom";
-            const animChanged = nextAnim !== pbOpts.ctaAnim;
+            const nextLang = pbc.opts.lobbyLang === "en" ? "en" : "fr";
+            const animChanged = nextAnim !== pbOpts.ctaAnim || nextLang !== pbOpts.lobbyLang;
             pbOpts = {
               enabled: pbc.opts.enabled !== false,
               speedSec: Number(pbc.opts.speedSec) || 4,
               order: pbc.opts.order === "desc" ? "desc" : "asc",
               ctaAnim: nextAnim,
+              lobbyLang: nextLang,
             };
             saveOptsCookie();
+            applyLobbyTranslations();
             if (animChanged) {
-              ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+              ctaPhraseIdx = (ctaPhraseIdx + 1) % 2;
               updateLobbyCtaElement(true);
             }
           }
@@ -1660,19 +1723,8 @@
         }
       }
 
-      // 2. Badges de difficulté (uniquement si changement, masqué dans le Lobby)
-      const diffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;
-      if (diffKey !== lastDiffKey) {
-        lastDiffKey = diffKey;
-        const diffBadge = $("diff-badge");
-        if (diffBadge) {
-          const useBeg = s.phase === "LOBBY" || s.phase === "PODIUM" ? isBeg : s.difficulty === "debutant";
-          diffBadge.textContent = useBeg
-            ? `🌱 Débutant (${bCount}/${bTotal})`
-            : `🔥 Standard (${bCount}/${bTotal})`;
-          diffBadge.className = `${s.phase === "LOBBY" ? "hidden " : ""}text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
-        }
-      }
+      // 2. Badges de difficulté masqués dans l'en-tête TV
+      lastDiffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;
 
       // 3. Catégories dans le menu Régie & podium (uniquement si changement)
       const cats = s.categories || [];
@@ -1830,10 +1882,14 @@
     try { profile = JSON.parse(localStorage.getItem("qal_profile") || "null"); } catch (_) {}
     let selectedAvatar = (profile && profile.avatar) || AVATARS[Math.floor(Math.random() * AVATARS.length)];
     let selectedBeginner = !!(profile && profile.beginner);
+    let selectedLang = (profile && profile.lang === "en") ? "en" : "fr";
+    let draftName = (profile && profile.name) || "";
     let selectedVote = "";
     let manualJoinRequired = false;
     let kickedReason = "";
     let ws = null, state = null, lastKey = "", joinSent = false, pendingChoice = null, celebrated = "", editing = false;
+
+    const isEn = () => ((state && state.joined && !editing ? state.my_lang : selectedLang) === "en");
 
     app.innerHTML = `
       <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
@@ -1892,10 +1948,11 @@
         state = msg;
         if (!state.joined && profile && profile.name && !joinSent && !manualJoinRequired) {
           joinSent = true;
-          sendMsg({ type: "JOIN", name: profile.name, avatar: profile.avatar, beginner: !!profile.beginner });
+          sendMsg({ type: "JOIN", name: profile.name, avatar: profile.avatar, beginner: !!profile.beginner, lang: profile.lang === "en" ? "en" : "fr" });
         }
         if (state.joined) {
           selectedBeginner = !!state.my_beginner;
+          selectedLang = state.my_lang === "en" ? "en" : "fr";
           manualJoinRequired = false;
         }
         if (state.phase !== "QUESTION" || state.my_answer !== null) pendingChoice = null;
@@ -1918,32 +1975,39 @@
 
     function render() {
       const s = state;
+      const en = isEn();
       $("me").innerHTML = s.joined
         ? `<span class="text-xl">${esc(s.avatar)}</span><span class="font-semibold max-w-[6.5rem] truncate">${esc(s.name)}</span><span class="bg-amber-400 text-slate-900 font-bold rounded-full px-2">${s.score}</span>`
         : "";
+      setText("btn-leave", en ? "🚪 Leave game" : "🚪 Quitter la partie");
       $("pl-footer").classList.toggle("hidden", !s.joined);
       const answered = s.my_answer !== null || pendingChoice !== null;
       const key = (!s.joined || editing)
-        ? `join|${!!s.voting_enabled}|${kickedReason}`
+        ? `join|${!!s.voting_enabled}|${kickedReason}|${selectedLang}`
         : (s.phase === "LOBBY" || s.phase === "PODIUM")
-          ? `${s.phase}|${s.q_index}|${!!s.voting_enabled}`
-          : `${s.phase}|${s.q_index}|${answered}`;
+          ? `${s.phase}|${s.q_index}|${!!s.voting_enabled}|${en}`
+          : `${s.phase}|${s.q_index}|${answered}|${en}`;
       if (key !== lastKey) { lastKey = key; buildView(); }
       updatePlayerDynamic();
     }
 
     function updatePlayerDynamic() {
       const s = state;
+      const en = isEn();
       setText("pl-timer", fmt(s.timer));
       setText("pl-count", s.players_count);
-      setText("pl-cat", `${catIcon(s.category)} ${s.category || ""}`);
-      setText("pl-next-cat", `${catIcon(s.next_category)} ${s.next_category || ""}`);
+      setText("pl-cat", `${catIcon(s.category)} ${catLabel(s.category, en)}`);
+      setText("pl-next-cat", `${catIcon(s.next_category)} ${catLabel(s.next_category, en)}`);
 
       const bCount = s.beginner_count || 0;
       const bTotal = s.beginner_total || 0;
-      setText("pl-diff-info", s.beginner_mode
-        ? `🌱 Niveau Débutant actif (${bCount}/${bTotal} débutants)`
-        : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`);
+      setText("pl-diff-info", en
+        ? (s.beginner_mode
+          ? `🌱 Beginner Mode active (${bCount}/${bTotal} beginners)`
+          : `🔥 Standard Level (${bCount}/${bTotal} beginners)`)
+        : (s.beginner_mode
+          ? `🌱 Niveau Débutant actif (${bCount}/${bTotal} débutants)`
+          : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`));
 
       const begCb = $("pl-beginner");
       if (begCb) begCb.checked = !!s.my_beginner;
@@ -1968,14 +2032,15 @@
 
     function voteSectionHtml(s) {
       if (!s.voting_enabled) return "";
+      const en = isEn();
       const cats = s.categories || [];
       return `
         <div class="w-full bg-white/10 border border-white/15 rounded-2xl p-3 text-left">
-          <div class="text-xs uppercase opacity-75 mb-2 font-bold">🗳️ Vote pour la catégorie</div>
+          <div class="text-xs uppercase opacity-75 mb-2 font-bold">${en ? "🗳️ Vote for the category" : "🗳️ Vote pour la catégorie"}</div>
           <div class="grid grid-cols-1 gap-1.5">
             ${cats.map(cat => `
               <button type="button" data-cat="${esc(cat)}" class="pl-vote-btn rounded-xl px-3 py-2 text-xs font-bold transition flex items-center justify-between gap-2 bg-white/10">
-                <span>${catIcon(cat)} ${esc(cat)}</span>
+                <span>${catIcon(cat)} ${esc(catLabel(cat, en))}</span>
                 <span class="pl-vote-meta"></span>
               </button>`).join("")}
           </div>
@@ -1992,11 +2057,12 @@
     }
 
     function beginnerToggleHtml(s) {
+      const en = isEn();
       return `
         <label class="w-full flex items-center gap-3 bg-white/10 border border-white/15 rounded-2xl px-4 py-2.5 cursor-pointer">
           <input id="pl-beginner" type="checkbox" class="w-5 h-5 accent-amber-400" ${s.my_beginner ? "checked" : ""} />
           <div class="text-left flex-1">
-            <div class="text-sm font-bold">🌱 Mode Débutant</div>
+            <div class="text-sm font-bold">${en ? "🌱 Beginner Mode" : "🌱 Mode Débutant"}</div>
             <div id="pl-diff-info" class="text-xs opacity-75"></div>
           </div>
         </label>`;
@@ -2018,43 +2084,62 @@
 
     function buildView() {
       const s = state, main = $("pl-main");
+      const en = isEn();
 
       if (!s.joined || editing) {
         main.innerHTML = `
-          <div class="flex-1 flex flex-col gap-4 justify-center pop py-2">
+          <div class="flex-1 flex flex-col gap-3.5 justify-center pop py-2">
             <div class="flex justify-center">
-              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-12 w-auto object-contain" />
+              <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-11 w-auto object-contain" />
             </div>
-            <h1 class="text-3xl font-black text-center">Rejoins la partie !</h1>
+            <h1 class="text-3xl font-black text-center">${en ? "Join the game!" : "Rejoins la partie !"}</h1>
             ${kickedReason ? `<div class="bg-amber-400/20 border border-amber-300/40 text-amber-200 rounded-2xl px-4 py-2.5 text-sm font-semibold text-center">${esc(kickedReason)}</div>` : ""}
             <div>
-              <div class="text-sm uppercase opacity-70 mb-2">Choisis ton avatar</div>
+              <div class="text-xs uppercase opacity-70 mb-1.5 font-bold">${en ? "🌐 Game language / Langue du jeu" : "🌐 Langue du jeu / Game language"}</div>
+              <div class="grid grid-cols-2 gap-2">
+                <button type="button" data-lang="fr" class="lang-btn rounded-2xl py-2.5 px-3 font-black text-sm flex items-center justify-center gap-2 transition ${selectedLang !== "en" ? "bg-amber-400 text-slate-900 ring-2 ring-amber-200 shadow-lg" : "bg-white/10 text-white hover:bg-white/20"}">
+                  <span>🇫🇷</span><span>Français</span>
+                </button>
+                <button type="button" data-lang="en" class="lang-btn rounded-2xl py-2.5 px-3 font-black text-sm flex items-center justify-center gap-2 transition ${selectedLang === "en" ? "bg-amber-400 text-slate-900 ring-2 ring-amber-200 shadow-lg" : "bg-white/10 text-white hover:bg-white/20"}">
+                  <span>🇬🇧</span><span>English</span>
+                </button>
+              </div>
+            </div>
+            <div>
+              <div class="text-sm uppercase opacity-70 mb-2">${en ? "Choose your avatar" : "Choisis ton avatar"}</div>
               <div id="avatars" class="grid grid-cols-8 gap-2">
                 ${AVATARS.map(a => `<button data-a="${a}" class="avatar text-3xl aspect-square rounded-xl bg-white/10 transition ${a === selectedAvatar ? "ring-4 ring-amber-300 bg-white/25 scale-110" : ""}">${a}</button>`).join("")}
               </div>
             </div>
             <div>
-              <div class="text-sm uppercase opacity-70 mb-2">Ton pseudo</div>
-              <input id="name" maxlength="16" autocomplete="off" placeholder="Ex : Super Quizzeur"
+              <div class="text-sm uppercase opacity-70 mb-2">${en ? "Your nickname" : "Ton pseudo"}</div>
+              <input id="name" maxlength="16" autocomplete="off" placeholder="${en ? "Ex: Laser Champ" : "Ex : Super Quizzeur"}"
                 class="w-full rounded-2xl bg-white text-slate-900 text-xl font-bold px-4 py-3.5 outline-none focus:ring-4 ring-amber-300"
-                value="${esc((profile && profile.name) || "")}" />
+                value="${esc(draftName || (profile && profile.name) || "")}" />
             </div>
             <label class="flex items-center gap-3 bg-white/10 border border-white/15 rounded-2xl px-4 py-3 cursor-pointer">
               <input id="join-beginner" type="checkbox" class="w-6 h-6 accent-amber-400" ${selectedBeginner ? "checked" : ""} />
               <div class="text-left">
-                <div class="font-bold text-base">🌱 Débutant</div>
-                <div class="text-xs opacity-75">Questions plus faciles si &gt; 50 % des joueurs cochent Débutant</div>
+                <div class="font-bold text-base">${en ? "🌱 Beginner" : "🌱 Débutant"}</div>
+                <div class="text-xs opacity-75">${en ? "Easier questions if &gt; 50% of players check Beginner" : "Questions plus faciles si &gt; 50 % des joueurs cochent Débutant"}</div>
               </div>
             </label>
             ${voteSectionHtml(s)}
-            <button id="join" class="w-full rounded-2xl bg-amber-400 text-slate-900 text-2xl font-black py-4 shadow-xl active:scale-95 transition">C'est parti ! 🚀</button>
+            <button id="join" class="w-full rounded-2xl bg-amber-400 text-slate-900 text-2xl font-black py-4 shadow-xl active:scale-95 transition">${en ? "Let's go! 🚀" : "C'est parti ! 🚀"}</button>
             <div id="join-err" class="text-center text-rose-300 h-5"></div>
           </div>`;
+        main.querySelectorAll(".lang-btn").forEach(btn => btn.onclick = () => {
+          const inp = $("name");
+          if (inp) draftName = inp.value;
+          selectedLang = btn.dataset.lang === "en" ? "en" : "fr";
+          render();
+        });
         main.querySelectorAll(".avatar").forEach(btn => btn.onclick = () => {
           selectedAvatar = btn.dataset.a;
           main.querySelectorAll(".avatar").forEach(b => b.classList.remove("ring-4", "ring-amber-300", "bg-white/25", "scale-110"));
           btn.classList.add("ring-4", "ring-amber-300", "bg-white/25", "scale-110");
         });
+        $("name").oninput = (e) => { draftName = e.target.value; };
         $("join-beginner").onchange = (e) => { selectedBeginner = e.target.checked; };
         bindVoteButtons(main, (cat) => {
           selectedVote = cat;
@@ -2062,19 +2147,20 @@
         });
         const doJoin = () => {
           const name = $("name").value.trim();
-          if (!name) { setText("join-err", "Entre un pseudo 🙂"); return; }
+          if (!name) { setText("join-err", en ? "Enter a nickname 🙂" : "Entre un pseudo 🙂"); return; }
+          draftName = name;
           selectedBeginner = $("join-beginner").checked;
-          profile = { name, avatar: selectedAvatar, beginner: selectedBeginner };
+          profile = { name, avatar: selectedAvatar, beginner: selectedBeginner, lang: selectedLang };
           localStorage.setItem("qal_profile", JSON.stringify(profile));
           joinSent = true;
           editing = false;
           manualJoinRequired = false;
           kickedReason = "";
-          const payload = { type: "JOIN", name, avatar: selectedAvatar, beginner: selectedBeginner };
+          const payload = { type: "JOIN", name, avatar: selectedAvatar, beginner: selectedBeginner, lang: selectedLang };
           if (selectedVote) payload.vote_category = selectedVote;
           sendMsg(payload);
           $("join").disabled = true;
-          $("join").textContent = "Connexion…";
+          $("join").textContent = en ? "Connecting…" : "Connexion…";
         };
         $("join").onclick = doJoin;
         $("name").onkeydown = (e) => { if (e.key === "Enter") doJoin(); };
@@ -2085,16 +2171,16 @@
         main.innerHTML = `
           <div class="flex-1 flex flex-col items-center justify-center text-center gap-3 pop py-2">
             <div class="text-7xl">${esc(s.avatar)}</div>
-            <div class="text-2xl font-black">Bienvenue ${esc(s.name)} !</div>
+            <div class="text-2xl font-black">${en ? `Welcome ${esc(s.name)}!` : `Bienvenue ${esc(s.name)} !`}</div>
             <div id="pl-cat" class="bg-amber-400/20 border border-amber-300/40 text-amber-200 rounded-full px-4 py-1.5 text-sm font-bold"></div>
             <div class="bg-white/10 rounded-3xl px-8 py-3">
-              <div class="text-xs uppercase opacity-70">La partie commence dans</div>
+              <div class="text-xs uppercase opacity-70">${en ? "Game starts in" : "La partie commence dans"}</div>
               <div id="pl-timer" class="text-5xl font-black font-mono"></div>
             </div>
-            <div class="text-sm opacity-75"><span id="pl-count"></span> joueur(s) dans la salle</div>
+            <div class="text-sm opacity-75"><span id="pl-count"></span> ${en ? "player(s) in the room" : "joueur(s) dans la salle"}</div>
             ${beginnerToggleHtml(s)}
             ${voteSectionHtml(s)}
-            <button id="edit" class="text-sm underline opacity-60 mt-1">Modifier mon profil</button>
+            <button id="edit" class="text-sm underline opacity-60 mt-1">${en ? "Edit my profile / language" : "Modifier mon profil / langue"}</button>
           </div>`;
         $("edit").onclick = () => { editing = true; render(); };
         bindBeginnerToggle();
@@ -2130,8 +2216,8 @@
           main.innerHTML = `
             <div class="flex-1 flex flex-col items-center justify-center text-center gap-5 pop">
               <div class="${COLORS[mine]} w-40 h-40 rounded-3xl flex items-center justify-center text-8xl shadow-2xl">${SHAPES[mine]}</div>
-              <div class="text-2xl font-black">🔒 Réponse verrouillée</div>
-              <div class="opacity-70 pulse-soft">En attente des autres joueurs…</div>
+              <div class="text-2xl font-black">${en ? "🔒 Answer locked" : "🔒 Réponse verrouillée"}</div>
+              <div class="opacity-70 pulse-soft">${en ? "Waiting for other players…" : "En attente des autres joueurs…"}</div>
               <div class="opacity-60">⏱ <span id="pl-timer"></span> s</div>
             </div>`;
         }
@@ -2144,22 +2230,22 @@
         const ok = s.last_correct === true;
         const bg = ok ? "bg-emerald-600" : (noAnswer ? "bg-slate-700" : "bg-rose-600");
         const myEvents = (s.round_events || []).filter(ev => ev.player_id === pid);
-        const streakChip = s.my_correct_streak >= 15 ? `<div class="bg-amber-300 text-slate-950 font-black rounded-full px-4 py-1 text-sm anim-flame">👑 15 à la suite — Sans-Faute !</div>`
-          : s.my_correct_streak >= 10 ? `<div class="bg-fuchsia-600 text-white font-black rounded-full px-4 py-1 text-sm anim-flame">⚡ Série Légendaire (${s.my_correct_streak} !)</div>`
-          : s.my_correct_streak >= 5 ? `<div class="bg-orange-500 text-white font-black rounded-full px-4 py-1 text-sm anim-flame">🔥 Série en Feu (${s.my_correct_streak} !)</div>`
-          : s.my_correct_streak >= 2 ? `<div class="bg-black/25 rounded-full px-3 py-1 text-xs font-bold">🔥 Série : ${s.my_correct_streak} d'affilée</div>`
-          : s.my_wrong_streak >= 5 ? `<div class="bg-cyan-700 text-white font-black rounded-full px-4 py-1 text-sm anim-ice">🧊 Coup de Froid (${s.my_wrong_streak} erreurs)</div>` : "";
+        const streakChip = s.my_correct_streak >= 15 ? `<div class="bg-amber-300 text-slate-950 font-black rounded-full px-4 py-1 text-sm anim-flame">${en ? "👑 15 in a row — Flawless!" : "👑 15 à la suite — Sans-Faute !"}</div>`
+          : s.my_correct_streak >= 10 ? `<div class="bg-fuchsia-600 text-white font-black rounded-full px-4 py-1 text-sm anim-flame">${en ? `⚡ Legendary Streak (${s.my_correct_streak}!)` : `⚡ Série Légendaire (${s.my_correct_streak} !)`}</div>`
+          : s.my_correct_streak >= 5 ? `<div class="bg-orange-500 text-white font-black rounded-full px-4 py-1 text-sm anim-flame">${en ? `🔥 Hot Streak (${s.my_correct_streak}!)` : `🔥 Série en Feu (${s.my_correct_streak} !)`}</div>`
+          : s.my_correct_streak >= 2 ? `<div class="bg-black/25 rounded-full px-3 py-1 text-xs font-bold">${en ? `🔥 Streak: ${s.my_correct_streak} in a row` : `🔥 Série : ${s.my_correct_streak} d'affilée`}</div>`
+          : s.my_wrong_streak >= 5 ? `<div class="bg-cyan-700 text-white font-black rounded-full px-4 py-1 text-sm anim-ice">${en ? `🧊 Cold Streak (${s.my_wrong_streak} misses)` : `🧊 Coup de Froid (${s.my_wrong_streak} erreurs)`}</div>` : "";
         main.innerHTML = `
           <div class="flex-1 ${bg} rounded-3xl flex flex-col items-center justify-center text-center gap-3 p-5 pop">
             <div class="text-6xl">${ok ? "✅" : (noAnswer ? "⏱️" : "❌")}</div>
-            <div class="text-3xl font-black">${ok ? "Bonne réponse !" : (noAnswer ? "Temps écoulé !" : "Raté !")}</div>
+            <div class="text-3xl font-black">${ok ? (en ? "Correct answer!" : "Bonne réponse !") : (noAnswer ? (en ? "Time's up!" : "Temps écoulé !") : (en ? "Wrong answer!" : "Raté !"))}</div>
             <div class="text-5xl font-black">+${s.last_points}</div>
             ${streakChip}
             ${myEvents.length ? `<div class="flex flex-wrap justify-center gap-1.5">${myEvents.map(ev => `<span class="bg-black/30 border border-white/25 rounded-full px-3 py-1 text-xs font-bold anim-event">${esc(ev.icon)} ${esc(ev.title)}</span>`).join("")}</div>` : ""}
             ${ans !== null ? `<div class="flex items-center gap-3 bg-black/20 rounded-2xl px-4 py-3">
               <span class="${COLORS[ans]} w-12 h-12 rounded-xl flex items-center justify-center text-3xl">${SHAPES[ans]}</span>
               <span class="text-left font-semibold">${esc(s.question.options[ans])}</span></div>` : ""}
-            <div class="mt-1 text-lg">Score : <b>${s.score}</b> pts · ${s.rank ? `<b>${s.rank}<sup>${s.rank === 1 ? "er" : "e"}</sup></b> / ${s.players_count}` : ""}</div>
+            <div class="mt-1 text-lg">Score : <b>${s.score}</b> pts · ${s.rank ? `<b>${s.rank}<sup>${en ? ({1:"st",2:"nd",3:"rd"}[s.rank]||"th") : (s.rank === 1 ? "er" : "e")}</sup></b> / ${s.players_count}` : ""}</div>
           </div>`;
         if (ok && navigator.vibrate) navigator.vibrate([60, 40, 60]);
         return;
@@ -2180,17 +2266,17 @@
         main.innerHTML = `
           <div class="flex-1 flex flex-col items-center justify-center text-center gap-4 pop">
             <div class="bg-amber-400/20 border border-amber-300/40 text-amber-200 rounded-full px-4 py-1 text-sm font-bold">
-              ⚡ Point d'étape · ${s.q_index + 1} / ${s.q_total}
+              ⚡ ${en ? "Checkpoint" : "Point d'étape"} · ${s.q_index + 1} / ${s.q_total}
             </div>
             <div class="text-xl">
-              Tu es <b class="text-amber-300 text-2xl">${s.rank ? `${s.rank}<sup>${s.rank === 1 ? "er" : "e"}</sup>` : "-"}</b> / ${s.players_count} · <b>${s.score} pts</b>
+              ${en ? "You are" : "Tu es"} <b class="text-amber-300 text-2xl">${s.rank ? `${s.rank}<sup>${en ? ({1:"st",2:"nd",3:"rd"}[s.rank]||"th") : (s.rank === 1 ? "er" : "e")}</sup>` : "-"}</b> / ${s.players_count} · <b>${s.score} pts</b>
             </div>
             <div class="flex items-end justify-center gap-2 mt-2">
               ${miniStep(b[1], "2", "🥈", "h-20", "bg-slate-300 text-slate-800", "podium-2")}
               ${miniStep(b[0], "1", "🥇", "h-28", "bg-amber-400 text-slate-900 podium-shine", "podium-1")}
               ${miniStep(b[2], "3", "🥉", "h-14", "bg-orange-700 text-white", "podium-3")}
             </div>
-            <div class="opacity-70 text-sm mt-2">Reprise du quiz dans <b id="pl-timer" class="text-amber-300 text-base"></b> s</div>
+            <div class="opacity-70 text-sm mt-2">${en ? "Quiz resumes in" : "Reprise du quiz dans"} <b id="pl-timer" class="text-amber-300 text-base"></b> s</div>
           </div>`;
         return;
       }
@@ -2198,45 +2284,48 @@
       if (s.phase === "PODIUM") {
         const medal = { 1: "🥇", 2: "🥈", 3: "🥉" }[s.rank] || "🎉";
         const badges = s.my_badges || [];
-        const rankLabel = s.rank ? `${s.rank}${s.rank === 1 ? "er" : "e"}` : "-";
-        const shareText = `${medal} J'ai terminé ${rankLabel}/${s.players_count} au Laser Quiz (${s.category}) avec ${s.score} pts !${s.my_best_streak >= 3 ? ` 🔥 Série max : ${s.my_best_streak}` : ""}${s.my_fastest_time ? ` 🚀 Éclair : ${Number(s.my_fastest_time).toFixed(2)}s` : ""}`;
+        const ordSuffix = en ? ({ 1: "st", 2: "nd", 3: "rd" }[s.rank] || "th") : (s.rank === 1 ? "er" : "e");
+        const rankLabel = s.rank ? `${s.rank}${ordSuffix}` : "-";
+        const shareText = en
+          ? `${medal} I finished ${rankLabel}/${s.players_count} at Laser Quiz (${catLabel(s.category, true)}) with ${s.score} pts!${s.my_best_streak >= 3 ? ` 🔥 Max streak: ${s.my_best_streak}` : ""}${s.my_fastest_time ? ` 🚀 Fastest: ${Number(s.my_fastest_time).toFixed(2)}s` : ""}`
+          : `${medal} J'ai terminé ${rankLabel}/${s.players_count} au Laser Quiz (${s.category}) avec ${s.score} pts !${s.my_best_streak >= 3 ? ` 🔥 Série max : ${s.my_best_streak}` : ""}${s.my_fastest_time ? ` 🚀 Éclair : ${Number(s.my_fastest_time).toFixed(2)}s` : ""}`;
         const shareUrl = window.location.origin;
 
         main.innerHTML = `
           <div class="flex-1 flex flex-col items-center justify-center text-center gap-3 pop py-2">
             <div class="text-6xl">${medal}</div>
-            <div class="text-lg opacity-80">Tu termines</div>
-            <div class="text-5xl font-black">${s.rank ? `${s.rank}<sup class="text-2xl">${s.rank === 1 ? "er" : "e"}</sup>` : "-"}</div>
-            <div class="text-base">sur ${s.players_count} avec <b class="text-amber-300">${s.score} pts</b></div>
+            <div class="text-lg opacity-80">${en ? "You finished" : "Tu termines"}</div>
+            <div class="text-5xl font-black">${s.rank ? `${s.rank}<sup class="text-2xl">${ordSuffix}</sup>` : "-"}</div>
+            <div class="text-base">${en ? "out of" : "sur"} ${s.players_count} ${en ? "with" : "avec"} <b class="text-amber-300">${s.score} pts</b></div>
             ${(badges.length || s.my_best_streak >= 2 || s.my_fastest_time) ? `
               <div class="w-full bg-white/10 rounded-2xl p-2.5 flex flex-wrap justify-center gap-1.5">
-                ${s.my_best_streak >= 2 ? `<span class="bg-orange-500/30 border border-orange-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🔥 Série max : ${s.my_best_streak}</span>` : ""}
-                ${s.my_fastest_time ? `<span class="bg-cyan-500/25 border border-cyan-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🚀 Plus rapide : ${Number(s.my_fastest_time).toFixed(2)}s</span>` : ""}
+                ${s.my_best_streak >= 2 ? `<span class="bg-orange-500/30 border border-orange-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🔥 ${en ? "Max streak:" : "Série max :"} ${s.my_best_streak}</span>` : ""}
+                ${s.my_fastest_time ? `<span class="bg-cyan-500/25 border border-cyan-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">🚀 ${en ? "Fastest:" : "Plus rapide :"} ${Number(s.my_fastest_time).toFixed(2)}s</span>` : ""}
                 ${badges.map(b => `<span class="bg-amber-400/20 border border-amber-300/40 rounded-full px-2.5 py-0.5 text-xs font-bold">${esc(b.icon)} ${esc(b.label)}</span>`).join("")}
               </div>` : ""}
             <div class="w-full bg-white/10 rounded-2xl p-3 text-left">
               ${s.top3.map((p, i) => `<div class="flex items-center gap-3 py-1"><span>${["🥇", "🥈", "🥉"][i]}</span><span class="text-2xl">${esc(p.avatar)}</span><span class="flex-1 truncate font-semibold">${esc(p.name)}</span><b>${p.score}</b></div>`).join("")}
             </div>
             <div class="w-full bg-indigo-950/60 border border-white/15 rounded-2xl p-3 flex flex-col gap-2">
-              <div class="text-xs uppercase tracking-wider opacity-75 font-bold">📣 Partager mon score</div>
+              <div class="text-xs uppercase tracking-wider opacity-75 font-bold">${en ? "📣 Share my score" : "📣 Partager mon score"}</div>
               <button id="share-native" class="w-full rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 font-black py-2.5 text-sm shadow active:scale-95 transition">
-                📲 Partager / Story (Image + Texte)
+                ${en ? "📲 Share / Story (Image + Text)" : "📲 Partager / Story (Image + Texte)"}
               </button>
               <div class="grid grid-cols-4 gap-1.5 text-xs font-bold">
                 <a target="_blank" rel="noopener" data-share="x" href="https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}" class="share-link-btn bg-black/60 hover:bg-black/80 rounded-xl py-2 flex items-center justify-center">𝕏</a>
                 <a target="_blank" rel="noopener" data-share="facebook" href="https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(shareText)}" class="share-link-btn bg-blue-600/80 hover:bg-blue-600 rounded-xl py-2 flex items-center justify-center">📘 FB</a>
                 <a target="_blank" rel="noopener" data-share="whatsapp" href="https://wa.me/?text=${encodeURIComponent(shareText + " " + shareUrl)}" class="share-link-btn bg-emerald-600/80 hover:bg-emerald-600 rounded-xl py-2 flex items-center justify-center">💬 WA</a>
-                <button id="share-copy" class="bg-white/15 hover:bg-white/25 rounded-xl py-2">📋 Copier</button>
+                <button id="share-copy" class="bg-white/15 hover:bg-white/25 rounded-xl py-2">${en ? "📋 Copy" : "📋 Copier"}</button>
               </div>
               <div id="share-feedback" class="text-[11px] text-emerald-300 h-4"></div>
             </div>
             <div class="w-full bg-amber-400/15 border border-amber-300/40 rounded-2xl px-4 py-2 text-sm">
-              Catégorie suivante proposée :<br />
-              <b id="pl-next-cat" class="text-amber-300 text-base">${catIcon(s.next_category)} ${esc(s.next_category)}</b>
+              ${en ? "Next suggested category:" : "Catégorie suivante proposée :"}<br />
+              <b id="pl-next-cat" class="text-amber-300 text-base">${catIcon(s.next_category)} ${esc(catLabel(s.next_category, en))}</b>
             </div>
             ${beginnerToggleHtml(s)}
             ${voteSectionHtml(s)}
-            <div class="opacity-60 text-sm">Nouvelle partie dans <span id="pl-timer"></span> s</div>
+            <div class="opacity-60 text-sm">${en ? "Next game in" : "Nouvelle partie dans"} <span id="pl-timer"></span> s</div>
           </div>`;
 
         function loadShareLogo() {
@@ -2474,7 +2563,7 @@
       let mPbConfigKey = "";
       let mPbStores = DEFAULT_STORES.map(s => ({ ...s }));
       let mPbSelectedStore = mPbStores[0].name;
-      let mPbOpts = { enabled: true, speedSec: 4, order: "asc", ctaAnim: "neon_zoom" };
+      let mPbOpts = { enabled: true, speedSec: 4, order: "asc", ctaAnim: "neon_zoom", lobbyLang: "fr" };
 
       app.innerHTML = `
         <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
@@ -2521,8 +2610,12 @@
             </div>
             <div class="bg-white/10 border border-white/15 rounded-2xl p-3 flex flex-col gap-2">
               <div class="flex items-center justify-between">
-                <span class="text-xs uppercase tracking-wider font-extrabold text-cyan-300">✨ Animation Accroche Lobby</span>
+                <span class="text-xs uppercase tracking-wider font-extrabold text-cyan-300">✨ Lobby : Langue &amp; Animation</span>
               </div>
+              <select id="mr-lobby-lang-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
+                <option value="fr">🇫🇷 Langue du Lobby : Français</option>
+                <option value="en">🇬🇧 Lobby Language : English</option>
+              </select>
               <select id="mr-cta-anim-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
                 <option value="neon_zoom">⚡ Zoom Élastique &amp; Néon</option>
                 <option value="flip_3d">🔄 Flip 3D Arcade</option>
@@ -2653,6 +2746,7 @@
         if ($("mr-pb-speed-select")) $("mr-pb-speed-select").value = String(mPbOpts.speedSec);
         if ($("mr-pb-order-select")) $("mr-pb-order-select").value = mPbOpts.order;
         if ($("mr-cta-anim-select")) $("mr-cta-anim-select").value = mPbOpts.ctaAnim || "neon_zoom";
+        if ($("mr-lobby-lang-select")) $("mr-lobby-lang-select").value = mPbOpts.lobbyLang === "en" ? "en" : "fr";
         setText("mr-pb-status", `Magasin actif sur TV : ${mPbSelectedStore} · ${mPbOpts.order === "asc" ? "Chronologique" : "Récentes d'abord"}`);
       }
       function renderMobileStoresEditor() {
@@ -2704,6 +2798,11 @@
       $("mr-test-stop").onclick = () => sendTv("STOP_TEST_GAME");
       $("mr-cta-anim-select").onchange = (e) => {
         mPbOpts.ctaAnim = e.target.value || "neon_zoom";
+        syncMobilePbControls();
+        pushMobilePbConfig();
+      };
+      $("mr-lobby-lang-select").onchange = (e) => {
+        mPbOpts.lobbyLang = e.target.value === "en" ? "en" : "fr";
         syncMobilePbControls();
         pushMobilePbConfig();
       };
@@ -2839,6 +2938,7 @@
                 ctaAnim: ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(pbc.opts.ctaAnim)
                   ? pbc.opts.ctaAnim
                   : "neon_zoom",
+                lobbyLang: pbc.opts.lobbyLang === "en" ? "en" : "fr",
               };
             }
             syncMobilePbControls();

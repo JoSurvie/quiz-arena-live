@@ -341,12 +341,20 @@ def load_questions() -> list[dict[str, Any]]:
             and 0 <= answer < 4
         ):
             diff = str(item.get("difficulty", "standard")).strip().lower()
+            raw_opts_en = item.get("options_en")
+            opts_en = (
+                [str(o) for o in raw_opts_en]
+                if isinstance(raw_opts_en, list) and len(raw_opts_en) == 4
+                else [str(o) for o in options]
+            )
             valid.append(
                 {
                     "category": str(item.get("category", "Général")),
                     "difficulty": "debutant" if diff == "debutant" else "standard",
                     "q": item["q"],
+                    "q_en": str(item.get("q_en") or item["q"]),
                     "options": [str(o) for o in options],
+                    "options_en": opts_en,
                     "answer": answer,
                 }
             )
@@ -420,6 +428,7 @@ class Player:
         self.last_correct: bool | None = None
         self.vote_category: str | None = None
         self.beginner = False
+        self.lang = "fr"
         self.correct_streak = 0
         self.wrong_streak = 0
         self.best_streak = 0
@@ -490,6 +499,7 @@ class Room:
             "speedSec": 4,
             "order": "asc",
             "ctaAnim": "neon_zoom",
+            "lobbyLang": "fr",
         }
         self.pb_refresh_seq: int = 0
         self.pb_synced_from_tv: bool = False
@@ -749,6 +759,8 @@ class Room:
             indexed = list(enumerate(q["options"]))
             SYS_RNG.shuffle(indexed)
             new_options = [opt for _, opt in indexed]
+            orig_opts_en = q.get("options_en") or q["options"]
+            new_options_en = [orig_opts_en[orig_i] for orig_i, _ in indexed]
             new_answer = next(
                 i for i, (orig_i, _) in enumerate(indexed) if orig_i == q["answer"]
             )
@@ -757,7 +769,9 @@ class Room:
                     "category": q["category"],
                     "difficulty": q["difficulty"],
                     "q": q["q"],
+                    "q_en": q.get("q_en") or q["q"],
                     "options": new_options,
+                    "options_en": new_options_en,
                     "answer": new_answer,
                 }
             )
@@ -1283,6 +1297,7 @@ class Room:
             "last_points": p.last_points,
             "last_correct": p.last_correct,
             "beginner": p.beginner,
+            "lang": p.lang,
             "vote_category": p.vote_category,
             "correct_streak": p.correct_streak,
             "wrong_streak": p.wrong_streak,
@@ -1292,11 +1307,14 @@ class Room:
             "missed_streak": p.missed_streak,
         }
 
-    def _question_payload(self, with_answer: bool) -> dict[str, Any] | None:
+    def _question_payload(self, with_answer: bool, lang: str = "fr") -> dict[str, Any] | None:
         q = self.current_question()
         if q is None or self.phase not in ("QUESTION", "REVEAL"):
             return None
-        payload = {"category": q["category"], "q": q["q"], "options": q["options"]}
+        use_en = lang == "en"
+        q_text = (q.get("q_en") or q["q"]) if use_en else q["q"]
+        opts = (q.get("options_en") or q["options"]) if use_en else q["options"]
+        payload = {"category": q["category"], "q": q_text, "options": opts}
         if with_answer:
             payload["answer"] = q["answer"]
         return payload
@@ -1383,7 +1401,7 @@ class Room:
             "next_category": self.next_category,
             "q_index": self.q_index,
             "q_total": len(self.questions),
-            "question": self._question_payload(with_answer=reveal),
+            "question": self._question_payload(with_answer=reveal, lang=p.lang),
             "joined": p.joined,
             "name": p.name,
             "avatar": p.avatar,
@@ -1393,6 +1411,7 @@ class Room:
             "my_answer": p.answer,
             "my_vote": p.vote_category,
             "my_beginner": p.beginner,
+            "my_lang": p.lang,
             "my_correct_streak": p.correct_streak,
             "my_wrong_streak": p.wrong_streak,
             "my_best_streak": p.best_streak,
@@ -2097,11 +2116,19 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                         "wave_glow",
                     ):
                         cta_anim = "neon_zoom"
+                    lobby_lang = str(
+                        raw_opts.get("lobbyLang")
+                        or current.pb_opts.get("lobbyLang")
+                        or "fr"
+                    ).strip().lower()
+                    if lobby_lang not in ("fr", "en"):
+                        lobby_lang = "fr"
                     current.pb_opts = {
                         "enabled": bool(raw_opts.get("enabled", True)),
                         "speedSec": speed_sec,
                         "order": "desc" if raw_opts.get("order") == "desc" else "asc",
                         "ctaAnim": cta_anim,
+                        "lobbyLang": lobby_lang,
                     }
                 if msg.get("refresh"):
                     current.pb_refresh_seq += 1
@@ -2207,6 +2234,8 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                 player.missed_streak = 0
                 if "beginner" in msg:
                     player.beginner = bool(msg.get("beginner"))
+                if "lang" in msg:
+                    player.lang = "en" if str(msg.get("lang") or "").strip().lower() == "en" else "fr"
                 if "vote_category" in msg or "category" in msg:
                     vote_cat = msg.get("vote_category", msg.get("category"))
                     if vote_cat in room.available_categories():
@@ -2234,6 +2263,8 @@ async def ws_player(websocket: WebSocket, room_code: str, player_id: str) -> Non
                     continue
                 if "beginner" in msg:
                     player.beginner = bool(msg.get("beginner"))
+                if "lang" in msg:
+                    player.lang = "en" if str(msg.get("lang") or "").strip().lower() == "en" else "fr"
                 if "category" in msg and room.phase in ("LOBBY", "PODIUM"):
                     vote_cat = msg.get("category")
                     if vote_cat in room.available_categories():
