@@ -102,6 +102,87 @@
       will-change: transform;
       animation: ctaBreathe 2.6s ease-in-out infinite;
     }
+    @keyframes ctaNeonZoom {
+      0% { transform: scale(.45) rotate(-3deg); opacity: 0; filter: brightness(1.8); }
+      14% { transform: scale(1.13) rotate(1.2deg); opacity: 1; filter: brightness(1.3); }
+      24% { transform: scale(.97) rotate(0deg); opacity: 1; filter: brightness(1); }
+      34%, 100% { transform: scale(1); opacity: 1; }
+      52% { transform: scale(1.09); text-shadow: 0 0 28px rgba(252, 211, 77, .95), 0 0 48px rgba(245, 158, 11, .7); }
+      70% { transform: scale(1.01); text-shadow: 0 0 12px rgba(252, 211, 77, .45); }
+      86% { transform: scale(1.08); text-shadow: 0 0 26px rgba(252, 211, 77, .95), 0 0 44px rgba(56, 189, 248, .65); }
+    }
+    .cta-anim-neon_zoom {
+      display: inline-block;
+      will-change: transform, opacity;
+      text-shadow: 0 0 16px rgba(252, 211, 77, .55);
+      animation: ctaNeonZoom 3.2s cubic-bezier(.22, 1, .36, 1) both;
+    }
+    @keyframes ctaFlip3D {
+      0% { transform: perspective(600px) rotateX(-95deg) scale(.82); opacity: 0; }
+      16% { transform: perspective(600px) rotateX(18deg) scale(1.09); opacity: 1; }
+      28% { transform: perspective(600px) rotateX(-6deg) scale(1); opacity: 1; }
+      38%, 100% { transform: perspective(600px) rotateX(0deg) scale(1); opacity: 1; }
+      58% { transform: perspective(600px) rotateX(8deg) scale(1.08); text-shadow: 0 8px 26px rgba(252, 211, 77, .9); }
+      78% { transform: perspective(600px) rotateX(-5deg) scale(1.04); text-shadow: 0 -4px 20px rgba(56, 189, 248, .75); }
+    }
+    .cta-anim-flip_3d {
+      display: inline-block;
+      will-change: transform, opacity;
+      transform-origin: 50% 50%;
+      text-shadow: 0 0 16px rgba(252, 211, 77, .55);
+      animation: ctaFlip3D 3.2s cubic-bezier(.22, 1, .36, 1) both;
+    }
+    @keyframes ctaSlidePunch {
+      0% { transform: translateX(-85px) skewX(-18deg) scale(.88); opacity: 0; }
+      15% { transform: translateX(14px) skewX(7deg) scale(1.1); opacity: 1; }
+      26% { transform: translateX(-4px) skewX(-2deg) scale(1); opacity: 1; }
+      36%, 100% { transform: translateX(0) skewX(0deg) scale(1); opacity: 1; }
+      56% { transform: translateY(-5px) scale(1.08); text-shadow: 0 6px 26px rgba(252, 211, 77, .9); }
+      74% { transform: translateY(0) scale(1.01); }
+      88% { transform: translateY(-4px) scale(1.06); text-shadow: 0 6px 24px rgba(252, 211, 77, .85); }
+    }
+    .cta-anim-slide_punch {
+      display: inline-block;
+      will-change: transform, opacity;
+      text-shadow: 0 0 16px rgba(252, 211, 77, .55);
+      animation: ctaSlidePunch 3.2s cubic-bezier(.22, 1, .36, 1) both;
+    }
+    @keyframes ctaGlitchCyber {
+      0% { transform: scale(1.18) skewX(12deg); opacity: 0; text-shadow: -6px 0 #22d3ee, 6px 0 #f43f5e; }
+      6% { transform: translate(-5px, 2px) skewX(-8deg); opacity: 1; text-shadow: -5px 0 #22d3ee, 5px 0 #f43f5e; }
+      12% { transform: translate(5px, -2px) skewX(6deg); text-shadow: 5px 0 #22d3ee, -5px 0 #f43f5e; }
+      18% { transform: translate(-2px, 0) scale(1.08); text-shadow: -3px 0 #22d3ee, 3px 0 #f43f5e; }
+      25%, 100% { transform: translate(0, 0) scale(1); opacity: 1; text-shadow: 0 0 18px rgba(252, 211, 77, .7); }
+      52% { transform: scale(1.08); text-shadow: -2px 0 #22d3ee, 2px 0 #f43f5e, 0 0 26px rgba(252, 211, 77, .95); }
+      56% { transform: translate(3px, -1px) scale(1.09); text-shadow: 4px 0 #22d3ee, -4px 0 #f43f5e; }
+      60% { transform: translate(0, 0) scale(1.06); text-shadow: 0 0 22px rgba(252, 211, 77, .85); }
+      82% { transform: scale(1.08); text-shadow: 0 0 28px rgba(252, 211, 77, .95); }
+    }
+    .cta-anim-glitch_cyber {
+      display: inline-block;
+      will-change: transform, opacity;
+      animation: ctaGlitchCyber 3.2s ease-out both;
+    }
+    @keyframes ctaWaveGlow {
+      0% { transform: translateY(18px) scale(.88); opacity: 0; background-position: 0% 50%; }
+      20% { transform: translateY(-4px) scale(1.06); opacity: 1; }
+      35% { transform: translateY(0) scale(1); opacity: 1; }
+      55% { transform: translateY(-5px) scale(1.1); }
+      75% { transform: translateY(0) scale(1.02); }
+      90% { transform: translateY(-3px) scale(1.07); }
+      100% { transform: translateY(0) scale(1); opacity: 1; background-position: 200% 50%; }
+    }
+    .cta-anim-wave_glow {
+      display: inline-block;
+      will-change: transform, opacity;
+      background: linear-gradient(90deg, #fde047 0%, #ffffff 30%, #38bdf8 50%, #fde047 75%, #ffffff 100%);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent !important;
+      filter: drop-shadow(0 0 16px rgba(252, 211, 77, .65));
+      animation: ctaWaveGlow 3.2s ease-in-out both;
+    }
   </style>
 </head>
 <body class="text-white antialiased">
@@ -205,11 +286,14 @@
           return {
             enabled: parsed.enabled !== false,
             speedSec: Number(parsed.speedSec) || 4,
-            order: parsed.order === "desc" ? "desc" : "asc"
+            order: parsed.order === "desc" ? "desc" : "asc",
+            ctaAnim: ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(parsed.ctaAnim)
+              ? parsed.ctaAnim
+              : "neon_zoom"
           };
         }
       } catch (_) {}
-      return { enabled: true, speedSec: 4, order: "asc" };
+      return { enabled: true, speedSec: 4, order: "asc", ctaAnim: "neon_zoom" };
     })();
     let pbSelectedStore = getCookie("lge_pb_store") || pbStores[0].name;
     if (!pbStores.some(s => s.name === pbSelectedStore)) pbSelectedStore = pbStores[0].name;
@@ -226,6 +310,37 @@
     let preloadToken = 0;
     let lastPbConfigKey = "";
     let lastPbRefreshSeq = 0;
+    const CTA_PHRASES = ["Scannez pour jouer !", "Défi tes amis !"];
+    let ctaPhraseIdx = 0;
+    let ctaInterval = null;
+
+    function updateLobbyCtaElement(restartAnim = true) {
+      const el = $("lobby-cta");
+      if (!el) return;
+      const hasPlayers = !!(state && Array.isArray(state.players) && state.players.length > 0);
+      const anim = ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(pbOpts.ctaAnim)
+        ? pbOpts.ctaAnim
+        : "neon_zoom";
+      const sizeCls = hasPlayers
+        ? "text-[clamp(1.5rem,4.9vh,3.6rem)]"
+        : "text-[clamp(2.1rem,6.8vh,5.1rem)]";
+      const colorCls = ctaPhraseIdx === 0 ? "text-amber-300" : "text-cyan-300";
+      el.textContent = CTA_PHRASES[ctaPhraseIdx % CTA_PHRASES.length];
+      if (restartAnim) {
+        el.className = `${sizeCls} font-black tracking-tight ${colorCls} leading-tight`;
+        void el.offsetWidth;
+      }
+      el.className = `cta-anim-${anim} ${sizeCls} font-black tracking-tight ${colorCls} leading-tight`;
+    }
+
+    function ensureCtaLoop() {
+      if (ctaInterval) return;
+      ctaInterval = setInterval(() => {
+        if (!state || state.phase !== "LOBBY") return;
+        ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+        updateLobbyCtaElement(true);
+      }, 3200);
+    }
 
     function pushPhotoboothConfig(extra = {}) {
       send("SET_PHOTOBOOTH_CONFIG", {
@@ -360,6 +475,19 @@
                 🧹 Retirer les bots
               </button>
             </div>
+          </div>
+          <div class="bg-white/5 border border-white/15 rounded-xl p-2.5 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs uppercase tracking-wider font-extrabold text-cyan-300">✨ Animation Accroche Lobby</span>
+              <button id="btn-cta-preview" class="text-[11px] bg-white/10 hover:bg-white/20 rounded-lg px-2 py-0.5 font-bold">🔄 Tester phrase</button>
+            </div>
+            <select id="cta-anim-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
+              <option value="neon_zoom">⚡ Zoom Élastique &amp; Néon</option>
+              <option value="flip_3d">🔄 Flip 3D Arcade</option>
+              <option value="slide_punch">🚀 Slide Laser &amp; Impact</option>
+              <option value="glitch_cyber">👾 Glitch Cyber Laser</option>
+              <option value="wave_glow">✨ Shimmer Or &amp; Respiration</option>
+            </select>
           </div>
           <button id="btn-mobile-regie-qr" class="w-full bg-indigo-600/80 hover:bg-indigo-600 rounded-xl px-3 py-2 text-xs font-bold text-left">📱 Ouvrir la Régie sur mon cellulaire (QR)</button>
           <div id="regie-mobile-qr-box" class="hidden bg-slate-950/80 border border-white/15 rounded-xl p-3 flex flex-col items-center gap-2 text-center">
@@ -692,9 +820,21 @@
       sel.innerHTML = pbStores.map(s => `<option value="${esc(s.name)}" ${s.name === pbSelectedStore ? "selected" : ""}>${esc(s.name)}</option>`).join("");
       $("pb-speed-select").value = String(pbOpts.speedSec);
       $("pb-order-select").value = pbOpts.order;
+      if ($("cta-anim-select")) $("cta-anim-select").value = pbOpts.ctaAnim || "neon_zoom";
       applyPhotoboothVisibility();
       send("SET_PHOTOBOOTH_STORE", { store: pbSelectedStore });
     }
+    $("cta-anim-select").onchange = (e) => {
+      pbOpts.ctaAnim = e.target.value || "neon_zoom";
+      saveOptsCookie();
+      pushPhotoboothConfig();
+      ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+      updateLobbyCtaElement(true);
+    };
+    $("btn-cta-preview").onclick = () => {
+      ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+      updateLobbyCtaElement(true);
+    };
     function renderStoresEditor() {
       const box = $("pb-stores-editor");
       if (!box) return;
@@ -1178,14 +1318,9 @@
         main.innerHTML = `
           <div class="h-full flex flex-col justify-between overflow-hidden">
             <div id="lobby-grid" class="flex-1 min-h-0 grid ${hasPlayers ? "md:grid-cols-2" : "grid-cols-1"} gap-3 lg:gap-8 px-4 sm:px-8 lg:px-10 pt-1 pb-0.5 items-stretch overflow-hidden">
-              <div class="flex flex-col items-center justify-center text-center pop h-full min-h-0 ${hasPlayers ? "gap-1.5 sm:gap-2.5" : "gap-2.5 sm:gap-3.5"}">
-                <h2 id="lobby-cta" class="cta-breathe ${hasPlayers ? "text-[clamp(1.35rem,4.5vh,3.4rem)]" : "text-[clamp(1.85rem,6.2vh,4.8rem)]"} font-black tracking-tight text-amber-300 leading-none">Scannez pour jouer !</h2>
-                <div class="flex flex-wrap justify-center gap-1.5 sm:gap-2">
-                  <div class="inline-flex items-center gap-1.5 bg-amber-400/20 border border-amber-300/40 rounded-full px-3 sm:px-4 py-0.5 sm:py-1 text-xs sm:text-sm lg:text-base font-bold text-amber-200">
-                    <span>Thème :</span>
-                    <span id="lobby-cat-name">${catIcon(s.category)} ${esc(s.category)}</span>
-                  </div>
-                  <div id="lobby-diff-badge" class="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 sm:px-4 py-0.5 sm:py-1 text-xs sm:text-sm lg:text-base font-bold"></div>
+              <div class="flex flex-col items-center justify-center text-center pop h-full min-h-0 ${hasPlayers ? "gap-2.5 sm:gap-3.5" : "gap-3.5 sm:gap-5"}">
+                <div class="min-h-[clamp(2.4rem,8vh,6rem)] flex items-center justify-center px-2">
+                  <h2 id="lobby-cta" class="font-black tracking-tight text-amber-300 leading-tight">${esc(CTA_PHRASES[ctaPhraseIdx % CTA_PHRASES.length])}</h2>
                 </div>
                 <div id="big-qr-wrap" class="bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-2xl ${hasPlayers ? "w-[clamp(95px,23vh,235px)]" : "w-[clamp(115px,28vh,295px)]"}"><div id="big-qr"></div></div>
               </div>
@@ -1204,6 +1339,8 @@
               <div id="pb-strip" class="w-full h-full flex items-center overflow-hidden"></div>
             </section>
           </div>`;
+        ensureCtaLoop();
+        updateLobbyCtaElement(true);
         pbTrackKey = "";
         renderPhotoboothStrip(true);
         applyPhotoboothVisibility();
@@ -1490,12 +1627,21 @@
             setCookie("lge_pb_store", pbSelectedStore);
           }
           if (pbc.opts && typeof pbc.opts === "object") {
+            const nextAnim = ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(pbc.opts.ctaAnim)
+              ? pbc.opts.ctaAnim
+              : "neon_zoom";
+            const animChanged = nextAnim !== pbOpts.ctaAnim;
             pbOpts = {
               enabled: pbc.opts.enabled !== false,
               speedSec: Number(pbc.opts.speedSec) || 4,
               order: pbc.opts.order === "desc" ? "desc" : "asc",
+              ctaAnim: nextAnim,
             };
             saveOptsCookie();
+            if (animChanged) {
+              ctaPhraseIdx = (ctaPhraseIdx + 1) % CTA_PHRASES.length;
+              updateLobbyCtaElement(true);
+            }
           }
           syncStoreSelect();
           if (!$("pb-manage-panel").classList.contains("hidden")) renderStoresEditor();
@@ -1512,7 +1658,7 @@
         }
       }
 
-      // 2. Badges de difficulté (uniquement si changement)
+      // 2. Badges de difficulté (uniquement si changement, masqué dans le Lobby)
       const diffKey = `${s.phase}|${s.difficulty}|${isBeg}|${bCount}|${bTotal}`;
       if (diffKey !== lastDiffKey) {
         lastDiffKey = diffKey;
@@ -1522,14 +1668,7 @@
           diffBadge.textContent = useBeg
             ? `🌱 Débutant (${bCount}/${bTotal})`
             : `🔥 Standard (${bCount}/${bTotal})`;
-          diffBadge.className = `text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
-        }
-        const lobbyDiff = $("lobby-diff-badge");
-        if (lobbyDiff) {
-          lobbyDiff.textContent = isBeg
-            ? `🌱 Niveau Débutant (${bCount}/${bTotal} débutants)`
-            : `🔥 Niveau Standard (${bCount}/${bTotal} débutants)`;
-          lobbyDiff.className = `inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-bold ${isBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/10 text-white/85"}`;
+          diffBadge.className = `${s.phase === "LOBBY" ? "hidden " : ""}text-[10px] sm:text-xs font-bold px-2.5 py-0.5 rounded-full ${useBeg ? "bg-emerald-500/25 text-emerald-200 border border-emerald-400/40" : "bg-white/15 text-white"}`;
         }
       }
 
@@ -1626,10 +1765,7 @@
           lobbyPlayersCol.classList.toggle("hidden", !hasPlayers);
           lobbyPlayersCol.classList.toggle("flex", hasPlayers);
         }
-        const lobbyCta = $("lobby-cta");
-        if (lobbyCta) {
-          lobbyCta.className = `cta-breathe ${hasPlayers ? "text-[clamp(1.35rem,4.5vh,3.4rem)]" : "text-[clamp(1.85rem,6.2vh,4.8rem)]"} font-black tracking-tight text-amber-300 leading-none`;
-        }
+        updateLobbyCtaElement(false);
         const bigQrWrap = $("big-qr-wrap");
         if (bigQrWrap) {
           bigQrWrap.className = `bg-white p-2 sm:p-3 rounded-2xl sm:rounded-3xl shadow-2xl ${hasPlayers ? "w-[clamp(95px,23vh,235px)]" : "w-[clamp(115px,28vh,295px)]"}`;
@@ -2338,7 +2474,7 @@
       let mPbConfigKey = "";
       let mPbStores = DEFAULT_STORES.map(s => ({ ...s }));
       let mPbSelectedStore = mPbStores[0].name;
-      let mPbOpts = { enabled: true, speedSec: 4, order: "asc" };
+      let mPbOpts = { enabled: true, speedSec: 4, order: "asc", ctaAnim: "neon_zoom" };
 
       app.innerHTML = `
         <div class="h-[100dvh] flex flex-col max-w-xl mx-auto">
@@ -2382,6 +2518,18 @@
                   🧹 Retirer les bots
                 </button>
               </div>
+            </div>
+            <div class="bg-white/10 border border-white/15 rounded-2xl p-3 flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs uppercase tracking-wider font-extrabold text-cyan-300">✨ Animation Accroche Lobby</span>
+              </div>
+              <select id="mr-cta-anim-select" class="w-full rounded-xl bg-slate-800 border border-white/15 px-3 py-2 text-xs font-bold text-white outline-none">
+                <option value="neon_zoom">⚡ Zoom Élastique &amp; Néon</option>
+                <option value="flip_3d">🔄 Flip 3D Arcade</option>
+                <option value="slide_punch">🚀 Slide Laser &amp; Impact</option>
+                <option value="glitch_cyber">👾 Glitch Cyber Laser</option>
+                <option value="wave_glow">✨ Shimmer Or &amp; Respiration</option>
+              </select>
             </div>
             <button id="mr-btn-qr" class="w-full bg-indigo-600/80 hover:bg-indigo-600 active:scale-95 rounded-xl px-3 py-2.5 text-xs font-bold text-left">📱 Ouvrir la Régie sur un autre cellulaire (QR)</button>
             <div id="mr-qr-box" class="hidden bg-slate-950/80 border border-white/15 rounded-xl p-3 flex flex-col items-center gap-2 text-center">
@@ -2504,6 +2652,7 @@
         }
         if ($("mr-pb-speed-select")) $("mr-pb-speed-select").value = String(mPbOpts.speedSec);
         if ($("mr-pb-order-select")) $("mr-pb-order-select").value = mPbOpts.order;
+        if ($("mr-cta-anim-select")) $("mr-cta-anim-select").value = mPbOpts.ctaAnim || "neon_zoom";
         setText("mr-pb-status", `Magasin actif sur TV : ${mPbSelectedStore} · ${mPbOpts.order === "asc" ? "Chronologique" : "Récentes d'abord"}`);
       }
       function renderMobileStoresEditor() {
@@ -2553,6 +2702,11 @@
       $("mr-test-game").onclick = () => sendTv("START_TEST_GAME");
       $("mr-test-lobby").onclick = () => sendTv("TEST_GAME_LOBBY");
       $("mr-test-stop").onclick = () => sendTv("STOP_TEST_GAME");
+      $("mr-cta-anim-select").onchange = (e) => {
+        mPbOpts.ctaAnim = e.target.value || "neon_zoom";
+        syncMobilePbControls();
+        pushMobilePbConfig();
+      };
       $("mr-btn-qr").onclick = async () => {
         const box = $("mr-qr-box");
         box.classList.toggle("hidden");
@@ -2682,6 +2836,9 @@
                 enabled: pbc.opts.enabled !== false,
                 speedSec: Number(pbc.opts.speedSec) || 4,
                 order: pbc.opts.order === "desc" ? "desc" : "asc",
+                ctaAnim: ["neon_zoom", "flip_3d", "slide_punch", "glitch_cyber", "wave_glow"].includes(pbc.opts.ctaAnim)
+                  ? pbc.opts.ctaAnim
+                  : "neon_zoom",
               };
             }
             syncMobilePbControls();

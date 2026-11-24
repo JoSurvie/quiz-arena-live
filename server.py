@@ -485,7 +485,12 @@ class Room:
         self.session_ip: str = ""
         self.photobooth_store: str = DEFAULT_PHOTOBOOTH_STORES[0]["name"]
         self.pb_stores: list[dict[str, str]] = [dict(s) for s in DEFAULT_PHOTOBOOTH_STORES]
-        self.pb_opts: dict[str, Any] = {"enabled": True, "speedSec": 4, "order": "asc"}
+        self.pb_opts: dict[str, Any] = {
+            "enabled": True,
+            "speedSec": 4,
+            "order": "asc",
+            "ctaAnim": "neon_zoom",
+        }
         self.pb_refresh_seq: int = 0
         self.pb_synced_from_tv: bool = False
         self.current_game_id: str = ""
@@ -2079,10 +2084,24 @@ async def ws_tv(websocket: WebSocket, room: str | None = None) -> None:
                         speed_sec = 4
                     if speed_sec not in (2, 4, 6, 10):
                         speed_sec = 4
+                    cta_anim = str(
+                        raw_opts.get("ctaAnim")
+                        or current.pb_opts.get("ctaAnim")
+                        or "neon_zoom"
+                    ).strip()
+                    if cta_anim not in (
+                        "neon_zoom",
+                        "flip_3d",
+                        "slide_punch",
+                        "glitch_cyber",
+                        "wave_glow",
+                    ):
+                        cta_anim = "neon_zoom"
                     current.pb_opts = {
                         "enabled": bool(raw_opts.get("enabled", True)),
                         "speedSec": speed_sec,
                         "order": "desc" if raw_opts.get("order") == "desc" else "asc",
+                        "ctaAnim": cta_anim,
                     }
                 if msg.get("refresh"):
                     current.pb_refresh_seq += 1
