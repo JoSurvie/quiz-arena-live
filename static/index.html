@@ -305,7 +305,11 @@
 
     // --- Structure ---------------------------------------------------------
     app.innerHTML = `
-      <div class="h-full flex flex-col overflow-hidden">
+      <div id="lobby-bg-video-wrap" class="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        <video id="lobby-bg-video" src="/static/fond-quiz.mp4" autoplay loop muted playsinline preload="auto" class="w-full h-full object-cover"></video>
+        <div class="absolute inset-0 bg-slate-950/35"></div>
+      </div>
+      <div class="relative z-10 h-full flex flex-col overflow-hidden">
         <header class="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-1.5 sm:py-2.5 pr-14 sm:pr-20 shrink-0">
           <div class="flex flex-wrap items-center gap-2 sm:gap-3">
             <img src="${LOGO_URL}" alt="Laser Game Evolution" class="h-7 sm:h-10 w-auto object-contain" />
@@ -1156,6 +1160,19 @@
       lastPlayersKey = "__INIT__";
       lastCatsStateKey = "";
       lastDiffKey = "";
+      const bgWrap = $("lobby-bg-video-wrap");
+      const bgVid = $("lobby-bg-video");
+      if (bgWrap && bgVid) {
+        const isLobby = s.phase === "LOBBY";
+        bgWrap.classList.toggle("hidden", !isLobby);
+        if (isLobby) {
+          bgVid.muted = true;
+          const p = bgVid.play();
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        } else {
+          try { bgVid.pause(); } catch (_) {}
+        }
+      }
       if (s.phase === "LOBBY") {
         const hasPlayers = (s.players || []).length > 0;
         main.innerHTML = `
